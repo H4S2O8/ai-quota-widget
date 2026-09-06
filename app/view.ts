@@ -7,14 +7,23 @@
  */
 import { providerOrPlaceholder } from "./providers"
 import type { Account, AppConfig, Metric, Snapshot } from "./types"
-import type { Status } from "./util"
-import { statusOf, usedFraction } from "./util"
+import type { DisplayMode, NormalizedMetric, Status } from "./util"
+import { fmtMetricDetail, fmtMetricValue, normalizeMetric, statusOf } from "./util"
 
 export interface MetricRow {
   metric: Metric
   status: Status
   /** 已用比例 0–1，没有上限时为 undefined */
   used?: number
+  norm: NormalizedMetric
+  /**
+   * 渲染用的成品文本，在这里算一次。
+   *
+   * 主 App 和小组件都只读这两个字段，不各自调格式化函数——两边的口径就不可能
+   * 漂移。「增长式和扣除式统一显示」这件事只在这一层实现一次。
+   */
+  primary: string
+  detail: string
 }
 
 export interface AccountRow {
@@ -35,15 +44,26 @@ export interface AccountRow {
   severity: number
 }
 
-export function buildRows(config: AppConfig, snapshot: Snapshot): AccountRow[] {
+export function buildRows(
+  config: AppConfig,
+  snapshot: Snapshot,
+  now = Date.now(),
+): AccountRow[] {
+  const mode: DisplayMode = config.settings.displayMode === "used" ? "used" : "remaining"
   return config.accounts.map((account) => {
     const provider = providerOrPlaceholder(account.providerId)
     const state = snapshot.states[account.id]
-    const metrics: MetricRow[] = (state?.result?.metrics ?? []).map((metric) => ({
-      metric,
-      status: statusOf(metric, account.warnBelow),
-      used: usedFraction(metric),
-    }))
+    const metrics: MetricRow[] = (state?.result?.metrics ?? []).map((metric) => {
+      const norm = normalizeMetric(metric)
+      return {
+        metric,
+        status: statusOf(metric, account.warnBelow),
+        used: norm.fraction,
+        norm,
+        primary: fmtMetricValue(metric, mode),
+        detail: fmtMetricDetail(metric, now, mode),
+      }
+    })
 
     return {
       account,

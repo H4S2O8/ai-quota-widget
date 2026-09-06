@@ -73,6 +73,25 @@ X
 expect_fail "用了 Navigation 却没导入" e.tsx
 
 echo
+echo "== 不该误报的写法 =="
+cat > "$TMP/widget.tsx" <<'X'
+/**
+ * 文档注释里的占位符不是 JSX：
+ *   Authorization: Bearer <CMD_API_KEY>
+ *   泛型写法 Array<Foo> 同理
+ */
+import { Text, Widget } from "scripting"
+Widget.present(<Text>hi</Text>)
+X
+if python3 dev/check.py "$TMP" >/dev/null 2>&1; then
+  echo "  ok   注释里的 <PLACEHOLDER> 不误报"
+else
+  echo "  FAIL 注释里的 <PLACEHOLDER> 被误报成组件"
+  fail=1
+fi
+rm -f "$TMP/widget.tsx"
+
+echo
 echo "== 干净的文件应当通过 =="
 cat > "$TMP/widget.tsx" <<'X'
 import { Text, Widget } from "scripting"

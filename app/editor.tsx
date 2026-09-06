@@ -30,6 +30,7 @@ import type { Account, ProviderResult } from "./types"
 import { ACCENT, STATUS_COLOR } from "./theme"
 import { Card, FieldLabel, SectionTitle, Well } from "./ui"
 import { errorMessage, fmtMetricDetail, fmtMetricValue, newId, statusOf } from "./util"
+// 试抓预览用默认口径（剩余）——这一页是验接口通不通，不跟随面板设置
 
 export function AccountEditor({
   initial,

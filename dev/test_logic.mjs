@@ -32,6 +32,7 @@ const A = await build("p_anthropic.ts")
 const G = await build("p_generic.ts")
 const M = await build("p_moonshot.ts")
 const K = await build("p_kimicode.ts")
+const C = await build("p_commandcode.ts")
 const V = await build("view.ts")
 const R = await build("refresh.ts")
 
@@ -76,9 +77,11 @@ eq("无上限远高于阈值 -> good", U.statusOf(amt(50, undefined), 10), "good
 eq("已消费不判色", U.statusOf({ id: "s", label: "s", kind: "spent", value: 999 }, 1), "neutral")
 
 console.log("\n== 格式化 ==")
-eq("百分比取整", U.fmtMetricValue(pct(42.4)), "42%")
-eq("小额两位小数", U.fmtMetricValue(amt(3.456)), "3.46")
+eq("百分比默认显示剩余", U.fmtMetricValue(pct(42.4)), "58%")
+eq("百分比已用口径", U.fmtMetricValue(pct(42.4), "used"), "42%")
+eq("无单位金额仍是两位小数", U.fmtMetricValue(amt(3.456)), "3.46")
 eq("带单字符符号贴前面", U.fmtMetricValue({ ...amt(3.456), unit: "$" }), "$3.46")
+eq("次数走紧凑写法", U.fmtMetricValue({ id: "c", label: "c", kind: "count", value: 12345 }), "12.3K")
 eq("多字符单位放后面", U.fmtMetricValue({ ...amt(3.456), unit: "USD" }), "3.46 USD")
 eq("上万走紧凑", U.fmtCompact(12345), "12.3K")
 eq("整数不加小数", U.fmtCompact(42), "42")
@@ -175,10 +178,62 @@ eq("四个窗口都认", claudeFour.length, 4)
 eq("Sonnet 窗口有名字", claudeFour[2].label, "7 天 Sonnet")
 eq("Sonnet 比例乘了 100", claudeFour[2].value, 30)
 
+console.log("\n== Command Code 额度解析 ==")
+const ccPayload = {
+  credits: { monthlyCredits: 42.5, purchasedCredits: 10, freeCredits: 0, planId: "individual-goat" },
+  windowLimits: {
+    limited: true,
+    fiveHour: { used: 8, cap: 14, resetAt: t0 + 3600000 },
+    weekly: { used: 7, cap: 35, resetAt: t0 + 86400000 },
+  },
+}
+const cc = C.parseCredits(ccPayload)
+eq("两个窗口 + 一个额度池", cc.length, 3)
+eq("5 小时窗口排最前", cc[0].label, "5 小时")
+eq("窗口显示剩余额", cc[0].value, 6)
+eq("窗口上限是 cap", cc[0].max, 14)
+eq("窗口重置时间", cc[0].resetAt, t0 + 3600000)
+eq("7 天窗口剩余", cc[1].value, 28)
+eq("额度池是三块之和", cc[2].value, 52.5)
+check("额度池没有上限", cc[2].max === undefined)
+eq("缺 cap 的窗口跳过", C.parseCredits({ windowLimits: { fiveHour: { used: 3 } } }).length, 0)
+eq("什么都没有就给空", C.parseCredits({}).length, 0)
+
+console.log("\n== 增长式与扣除式统一 ==")
+// 同一屏里，Claude 的「已用 42%」和 DeepSeek 的「余额 ¥12.5」要读出同一个方向
+const grow = { id: "g", label: "5 小时", kind: "percent", value: 42 }
+const drain = { id: "d", label: "余额", kind: "amount", value: 12.5, unit: "¥", max: 50 }
+eq("增长式在剩余口径下取反", U.fmtMetricValue(grow, "remaining"), "58%")
+eq("增长式在已用口径下是原值", U.fmtMetricValue(grow, "used"), "42%")
+eq("扣除式在剩余口径下是原值", U.fmtMetricValue(drain, "remaining"), "¥12.50")
+eq("扣除式在已用口径下取反", U.fmtMetricValue(drain, "used"), "¥37.50")
+eq("增长式的副标题写已用", U.fmtMetricDetail(grow, t0, "remaining"), "已用 42% / 100%")
+eq("扣除式的副标题写已用", U.fmtMetricDetail(drain, t0, "remaining"), "已用 ¥37.50 / ¥50.00")
+// 两者归一后是同一套坐标
+const ng = U.normalizeMetric(grow)
+const nd = U.normalizeMetric(drain)
+eq("增长式归一：已用", ng.used, 42)
+eq("增长式归一：剩余", ng.remaining, 58)
+eq("增长式归一：比例", ng.fraction, 0.42)
+eq("扣除式归一：已用", nd.used, 37.5)
+eq("扣除式归一：剩余", nd.remaining, 12.5)
+eq("扣除式归一：比例", nd.fraction, 0.75)
+eq("方向记下来了", ng.direction, "consumed")
+eq("方向记下来了（扣除）", nd.direction, "remaining")
+// 没有上限的余额：算不出比例，也算不出已用
+const openEnded = { id: "o", label: "余额", kind: "amount", value: 9, unit: "$" }
+check("无上限没有比例", U.normalizeMetric(openEnded).fraction === undefined)
+eq("无上限仍显示剩余", U.fmtMetricValue(openEnded, "remaining"), "$9.00")
+eq("无上限在已用口径下退回剩余并说明", U.fmtMetricDetail(openEnded, t0, "used"), "剩余")
+// 已消费没有剩余可言
+const spent = { id: "s", label: "已消费", kind: "spent", value: 3.2, unit: "$" }
+eq("已消费在剩余口径下退回并说明", U.fmtMetricDetail(spent, t0, "remaining"), "已消费")
+eq("已消费的值照显示", U.fmtMetricValue(spent, "remaining"), "$3.20")
+
 console.log("\n== 视图模型 ==")
 const config = {
   version: 1,
-  settings: { refreshMinutes: 15, widgetSelfRefresh: true, timeoutSec: 10 },
+  settings: { refreshMinutes: 15, widgetSelfRefresh: true, timeoutSec: 10, displayMode: "remaining" },
   accounts: [
     { id: "a", providerId: "deepseek", label: "宽裕", enabled: true, config: {} },
     { id: "b", providerId: "deepseek", label: "见底", enabled: true, config: {} },
@@ -207,6 +262,8 @@ eq("汇总 good", totals.good, 1)
 eq("汇总 bad", totals.bad, 1)
 eq("汇总 failed", totals.failed, 1)
 check("失败的行仍带着上次的数值", rows.find((r) => r.account.id === "c").primary.metric.value === 50)
+check("行里直接带渲染好的文本", typeof rows[0].primary.primary === "string" && rows[0].primary.primary.length > 0)
+eq("两个界面拿到的是同一份文本", rows[0].primary.primary, U.fmtMetricValue(rows[0].primary.metric, "remaining"))
 
 console.log("\n== 抓取编排（打真实 HTTP） ==")
 const server = createServer((req, res) => {
@@ -226,7 +283,7 @@ const base = `http://127.0.0.1:${server.address().port}`
 
 const liveConfig = {
   version: 1,
-  settings: { refreshMinutes: 15, widgetSelfRefresh: true, timeoutSec: 10 },
+  settings: { refreshMinutes: 15, widgetSelfRefresh: true, timeoutSec: 10, displayMode: "remaining" },
   accounts: [
     {
       id: "good",

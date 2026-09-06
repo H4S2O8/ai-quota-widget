@@ -21,6 +21,7 @@
  * 只是接口形状不一样、不值得写代码的服务，用内置的「自定义 JSON 接口」配置即可。
  */
 import { anthropicProvider } from "./p_anthropic"
+import { commandcodeProvider } from "./p_commandcode"
 import { deepseekProvider } from "./p_deepseek"
 import { genericProvider } from "./p_generic"
 import { kimicodeProvider } from "./p_kimicode"
@@ -38,6 +39,7 @@ export const PROVIDERS: Provider[] = [
   siliconflowProvider,
   moonshotProvider,
   kimicodeProvider,
+  commandcodeProvider,
   oneapiProvider,
   genericProvider,
 ]

@@ -89,20 +89,49 @@ app_intents.tsx  小组件上的刷新按钮
 `utilization` 是 `0.42` 还是 `42` 也不确定，所以 `<= 1` 一律当小数。代价是真有 1%
 的时候会显示成 1%（而不是 100%）——这个方向的错比反过来安全。
 
+## remoteResource 不能填 GitHub 的 tree 网页
+
+第一版填的是 `https://github.com/<user>/<repo>/tree/main/app`（skill 模板里的写法）。
+**不工作**，手机上一直停在最初装的那个版本，而且不报错。
+
+原因很直白，curl 一下就看得见：
+
+```
+tree/main/app                         -> 200, 270KB, text/html
+releases/latest/download/AI-Quota.zip -> 200,  44KB, application/zip
+```
+
+文档对这个字段的说明是「a `.zip` or Git repository」，tree 网页两样都不是。
+
+现在填的是 `releases/latest/download/AI-Quota.zip`，它 302 到最新 release 的同名
+附件，所以**发一个新 release 就等于推一次更新**，不用改 script.json 里的 URL。
+
+两个后果要知道：
+
+- **只有发了 release 才会更新**，push 到 main 不会。这反而是好事——半成品不会
+  自动跑到手机上。
+- **改这个 URL 本身救不了已经装好的旧版本**。旧版本里存的是旧 URL，它拉不到东西
+  也就更新不了自己。必须手动重装一次，之后才进入自动更新的轨道。
+
+版本号现在显示在主列表的「诊断」那一行和诊断页顶部。装完之后先看一眼那里，
+确认拿到的是不是你以为的版本——不然「更新到没到」只能靠猜。
+
 ## 待验证（只能在真机上做）
 
 按重要性排：
 
-1. **小组件能不能读 App Group 目录里的配置。** 整个数据共享都压在这上面。
+1. **remoteResource 换成 release zip 直链之后到底更不更新。** 它是 302 跳转，
+   Scripting 的下载器跟不跟随重定向没有文档说明。不跟随的话就只能手动重装。
+2. **小组件能不能读 App Group 目录里的配置。** 整个数据共享都压在这上面。
    看诊断页的「小组件上次渲染 → 读到账户」是不是非 0。
-2. **小组件自刷新会不会被 iOS 掐掉。** 扩展进程有时间和内存限制（约 30MB），
+3. **小组件自刷新会不会被 iOS 掐掉。** 扩展进程有时间和内存限制（约 30MB），
    一次抓 4 个账户是否安全没验过。真被掐了就把「小组件自行刷新」关掉，
    靠打开 App 或点小组件上的刷新按钮更新。
-3. **AppIntent 刷新按钮是否真的重画。** `Widget.reloadAll()` 之后 WidgetKit 什么时候
+4. **AppIntent 刷新按钮是否真的重画。** `Widget.reloadAll()` 之后 WidgetKit 什么时候
    回来是系统说了算。
-4. **`widgetBackground` 传 shape 对象在着色模式下的表现。**
-5. **小组件里 Keychain 读不读得到**（探针会自己回答，看诊断页）。
-6. **`refreshable` 下拉刷新**在 List 上是否生效。
+5. **`widgetBackground` 传 shape 对象在着色模式下的表现。**
+6. **小组件里 Keychain 读不读得到**（探针会自己回答，看诊断页）。
+7. **`refreshable` 下拉刷新**在 List 上是否生效。
 
 踩到新的坑，往 `dev/check.py` 的 RISKY 里加一条，再往 `dev/test_check.sh` 里加一个
 反例。记在文档里的坑会被忘记，写进脚本的不会。

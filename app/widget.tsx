@@ -28,7 +28,7 @@ import { loadConfig, loadSnapshot, probeKeychain, saveSnapshot, writeWidgetDiag 
 import { STATUS_COLOR, TRACK_COLOR } from "./theme"
 import type { AccountRow } from "./view"
 import { buildRows, enabledRows, sortBySeverity, summarize } from "./view"
-import { fmtAgo, fmtMetricValue, fmtReset } from "./util"
+import { fmtAgo, fmtReset } from "./util"
 
 // ---------- 准备数据 ----------
 
@@ -110,7 +110,7 @@ function statusColor(row: AccountRow): { light: string; dark: string } {
 function Row({ row, barWidth, dense }: { row: AccountRow; barWidth: number; dense: boolean }) {
   const color = statusColor(row)
   const metric = row.primary?.metric
-  const value = !row.ok && row.error ? "失败" : metric ? fmtMetricValue(metric) : "—"
+  const value = !row.ok && row.error ? "失败" : (row.primary?.primary ?? "—")
 
   return (
     <VStack spacing={3} alignment="leading" frame={{ maxWidth: "infinity", alignment: "leading" }}>
@@ -197,7 +197,7 @@ function SmallView() {
       <Spacer />
 
       <Text font={28} fontWeight="bold" monospacedDigit lineLimit={1} foregroundStyle={color}>
-        {!row.ok && row.error ? "失败" : metric ? fmtMetricValue(metric) : "—"}
+        {!row.ok && row.error ? "失败" : (row.primary?.primary ?? "—")}
       </Text>
       <Text font={10} foregroundStyle="secondaryLabel" lineLimit={1}>
         {!row.ok && row.error ? row.error : (metric?.label ?? row.providerName)}
@@ -244,7 +244,7 @@ function LargeView() {
               </Text>
               <Spacer />
               <Text font={10} monospacedDigit foregroundStyle={STATUS_COLOR[sub.status]}>
-                {fmtMetricValue(sub.metric)}
+                {sub.primary}
               </Text>
             </HStack>
           ))}
@@ -272,7 +272,7 @@ function AccessoryRectangularView() {
         {row.account.label}
       </Text>
       <Text font="headline" monospacedDigit lineLimit={1}>
-        {!row.ok && row.error ? "失败" : metric ? fmtMetricValue(metric) : "—"}
+        {!row.ok && row.error ? "失败" : (row.primary?.primary ?? "—")}
       </Text>
       <Text font="caption2" lineLimit={1}>
         {metric?.resetAt ? fmtReset(metric.resetAt, now) : `${totals.bad + totals.failed} 项告警`}
@@ -298,7 +298,7 @@ function AccessoryCircularView() {
         <VStack spacing={0}>
           <Image systemName="gauge.with.dots.needle.33percent" font="caption" />
           <Text font="caption2" lineLimit={1}>
-            {row?.primary ? fmtMetricValue(row.primary.metric) : "—"}
+            {row?.primary?.primary ?? "—"}
           </Text>
         </VStack>
       )}

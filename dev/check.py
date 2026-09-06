@@ -115,7 +115,13 @@ def check_file(path: pathlib.Path) -> int:
 
     # 1) JSX 用到的大写开头组件。要求 < 前是空白/括号/逗号，
     #    这样 useState<Card[]> 之类的泛型不会被误判成标签。
-    used = set(re.findall(r'(?<=[\s(){}>,])<([A-Z]\w*)[\s/>]', src))
+    #
+    #    扫描前先去掉块注释：文档里写 `Authorization: Bearer <CMD_API_KEY>` 这种
+    #    占位符会被当成 JSX 标签，报一个根本不存在的「组件未定义」。
+    #    误报比漏报更糟——它会让人开始不信任这个检查器。
+    #    行注释不能一起去，`https://` 里的两个斜杠会被误伤。
+    jsx_src = re.sub(r'/\*.*?\*/', ' ', src, flags=re.S)
+    used = set(re.findall(r'(?<=[\s(){}>,])<([A-Z]\w*)[\s/>]', jsx_src))
     missing = sorted(used - known)
     if missing:
         fail += 1

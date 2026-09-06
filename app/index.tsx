@@ -13,6 +13,7 @@ import {
   Navigation,
   NavigationLink,
   NavigationStack,
+  Picker,
   Script,
   ScrollView,
   Section,
@@ -45,14 +46,13 @@ import type { WidgetDiag } from "./store"
 import type { Account, AppConfig, Snapshot } from "./types"
 import { EMPTY_SNAPSHOT } from "./types"
 import { Card, ProgressBar, SectionTitle, StatusPill } from "./ui"
-import { fmtAgo, fmtClock, fmtMetricDetail, fmtMetricValue } from "./util"
+import { fmtAgo, fmtClock } from "./util"
 import { buildRows, summarize } from "./view"
 import type { AccountRow, MetricRow } from "./view"
 
 // ---------- 账户行 ----------
 
 function MetricLine({ item }: { item: MetricRow }) {
-  const now = Date.now()
   return (
     <VStack spacing={4} alignment="leading" frame={{ maxWidth: "infinity", alignment: "leading" }}>
       <HStack spacing={8}>
@@ -66,10 +66,10 @@ function MetricLine({ item }: { item: MetricRow }) {
           monospacedDigit
           foregroundStyle={STATUS_COLOR[item.status]}
         >
-          {fmtMetricValue(item.metric)}
+          {item.primary}
         </Text>
         <Text font={11} foregroundStyle="tertiaryLabel">
-          {fmtMetricDetail(item.metric, now)}
+          {item.detail}
         </Text>
       </HStack>
       {item.used !== undefined ? <ProgressBar used={item.used} status={item.status} /> : null}
@@ -273,6 +273,28 @@ function SettingsPage({
         </Card>
 
         <Card>
+          <SectionTitle text="显示口径" />
+          <Text font={11} foregroundStyle="secondaryLabel">
+            服务商给的额度一半是增长式（Claude 的「已用 42%」），一半是扣除式
+            （DeepSeek 的「余额 ¥12.5」）。混在一屏里没法扫，所以这里统一成同一个口径。
+          </Text>
+          <Picker
+            title="主数值显示"
+            value={settings.displayMode}
+            onChanged={(value: string) => patch({ displayMode: value === "used" ? "used" : "remaining" })}
+            pickerStyle="segmented"
+          >
+            <Text tag="remaining">还剩多少</Text>
+            <Text tag="used">用了多少</Text>
+          </Picker>
+          <Text font={11} foregroundStyle="tertiaryLabel">
+            {settings.displayMode === "used"
+              ? "大数字代表已经花掉的量，越大越紧张。"
+              : "大数字一律代表宽裕：已用 42% 会显示成剩 58%，和余额并排读方向一致。"}
+          </Text>
+        </Card>
+
+        <Card>
           <SectionTitle text="凭据存在哪" />
           <Text font={11} foregroundStyle="secondaryLabel">
             凭据和配置一起存在 App Group 容器里的 config.json。这个目录在「文件」App 里看不到，
@@ -301,6 +323,16 @@ function DiagnosticsPage({ snapshot, rows }: { snapshot: Snapshot; rows: Account
   return (
     <ScrollView navigationTitle="诊断" navigationBarTitleDisplayMode="inline">
       <VStack spacing={14} padding={16}>
+        <Card>
+          <SectionTitle text="版本" />
+          <KeyValue label="当前版本" value={Script.metadata?.version ?? "未知"} />
+          <KeyValue label="脚本名" value={Script.name} />
+          <Text font={11} foregroundStyle="tertiaryLabel">
+            自动更新到没到，看这里。远程更新是按 script.json 的 version 生效的，
+            版本号没变就说明还是旧代码。
+          </Text>
+        </Card>
+
         <Card>
           <SectionTitle text="存储" />
           <KeyValue label="App Group 目录" value={usingAppGroup() ? "可用" : "不可用（小组件读不到数据）"} />
@@ -566,7 +598,7 @@ function MainView() {
               <Text font={14}>诊断</Text>
               <Spacer />
               <Text font={11} foregroundStyle="tertiaryLabel">
-                小组件跑没跑 · 原始响应
+                v{Script.metadata?.version ?? "?"} · 原始响应
               </Text>
             </HStack>
           </NavigationLink>

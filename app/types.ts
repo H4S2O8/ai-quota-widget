@@ -105,6 +105,14 @@ export interface Settings {
   widgetSelfRefresh: boolean
   /** 单个账户的请求超时（秒） */
   timeoutSec: number
+  /**
+   * 面板显示「还剩多少」还是「用了多少」。
+   *
+   * 存在的理由：服务商给的额度一半是增长式（已用 42%）一半是扣除式（余额 ¥12.5），
+   * 混在一屏里没法扫。这个开关把两种统一成同一个口径，默认「剩余」——
+   * 大数字一律代表宽裕。
+   */
+  displayMode: "remaining" | "used"
 }
 
 export interface AppConfig {
@@ -134,6 +142,7 @@ export const DEFAULT_SETTINGS: Settings = {
   refreshMinutes: 15,
   widgetSelfRefresh: true,
   timeoutSec: 15,
+  displayMode: "remaining",
 }
 
 export const EMPTY_SNAPSHOT: Snapshot = { updatedAt: 0, states: {} }

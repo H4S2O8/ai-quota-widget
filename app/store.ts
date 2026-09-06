@@ -120,6 +120,7 @@ function normalizeSettings(raw: Partial<Settings> | undefined): Settings {
     refreshMinutes: Number.isFinite(minutes) ? Math.min(720, Math.max(5, minutes)) : DEFAULT_SETTINGS.refreshMinutes,
     widgetSelfRefresh: value.widgetSelfRefresh !== false,
     timeoutSec: Number.isFinite(timeout) ? Math.min(60, Math.max(5, timeout)) : DEFAULT_SETTINGS.timeoutSec,
+    displayMode: value.displayMode === "used" ? "used" : DEFAULT_SETTINGS.displayMode,
   }
 }
 

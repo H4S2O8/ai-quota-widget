@@ -2,7 +2,7 @@
  * 无依赖的小工具：取 JSON 路径、数字解析、HTTP 请求包装、格式化。
  * 这个文件不 import "scripting"，所以 dev/ 里的 node 测试可以直接跑它。
  */
-import type { Metric } from "./types"
+import type { Metric, MetricKind } from "./types"
 
 /** 按 "data.items[0].balance" 这种路径取值；任何一步取不到就返回 undefined */
 export function getPath(obj: unknown, path: string): unknown {
@@ -100,16 +100,69 @@ export function errorMessage(error: unknown): string {
   return String(error)
 }
 
-// ---------- 指标语义 ----------
+// ---------- 指标语义：把两种额度归一 ----------
 
-/** 已用比例 0–1；算不出来（没有上限的余额）返回 undefined */
-export function usedFraction(metric: Metric): number | undefined {
-  if (metric.kind === "percent") return clamp01(metric.value / 100)
-  if (metric.kind === "spent") return undefined
-  if (metric.max !== undefined && metric.max > 0) {
-    return clamp01(1 - metric.value / metric.max)
+/**
+ * 服务商给的额度是两种相反的形态：
+ *
+ *   **增长式**（consumed）——Claude 的「已用 42%」、Command Code 的「这 5 小时花了 $8」。
+ *                            数字往上涨，涨到头就没了。
+ *   **扣除式**（remaining）——DeepSeek 的「余额 ¥12.5」、Kimi Code 的「还剩 600 次」。
+ *                            数字往下掉，掉到零就没了。
+ *
+ * 一个面板里混着两种方向，是没法一眼扫的：你得先想清楚这一行的大数字是「用掉的」
+ * 还是「剩下的」，才知道它大是好事还是坏事。所以这里统一成同一套坐标：
+ *
+ *   used / total / remaining / fraction
+ *
+ * 四个量算得出多少算多少，渲染层只认这四个，不再关心 provider 原本给的是哪种。
+ * 方向信息保留在 direction 里，只在「没有上限、四个量算不全」时才用得上。
+ */
+export interface NormalizedMetric {
+  /** 已用量，与 total 同单位 */
+  used?: number
+  /** 上限 / 总量 */
+  total?: number
+  /** 剩余量 */
+  remaining?: number
+  /** 已用比例 0–1；没有上限时算不出来 */
+  fraction?: number
+  unit: string
+  /** provider 原本是按哪个方向报的 */
+  direction: "consumed" | "remaining"
+}
+
+export function normalizeMetric(metric: Metric): NormalizedMetric {
+  const unit = metric.unit ?? ""
+  switch (metric.kind) {
+    case "percent": {
+      // 百分比天然有上限，单位就是 %
+      const used = clamp(metric.value, 0, 100)
+      return {
+        used,
+        total: 100,
+        remaining: 100 - used,
+        fraction: used / 100,
+        unit: "%",
+        direction: "consumed",
+      }
+    }
+    case "spent": {
+      // 已消费，没有上限。给不出剩余，也给不出比例。
+      return { used: metric.value, unit, direction: "consumed" }
+    }
+    case "amount":
+    case "count": {
+      const remaining = metric.value
+      const total = metric.max !== undefined && metric.max > 0 ? metric.max : undefined
+      if (total === undefined) {
+        // 没有上限的余额：只知道剩多少，判色交给 warnBelow
+        return { remaining, unit, direction: "remaining" }
+      }
+      const used = Math.max(0, total - remaining)
+      return { used, total, remaining, fraction: clamp(used / total, 0, 1), unit, direction: "remaining" }
+    }
   }
-  return undefined
 }
 
 export type Status = "good" | "warn" | "bad" | "neutral"
@@ -119,46 +172,86 @@ export type Status = "good" | "warn" | "bad" | "neutral"
  * 已用 < 60% 绿，< 85% 橙，其余红；没有上限的余额只看 warnBelow。
  */
 export function statusOf(metric: Metric, warnBelow?: number): Status {
-  const used = usedFraction(metric)
-  if (used !== undefined) {
-    if (used < 0.6) return "good"
-    if (used < 0.85) return "warn"
+  const norm = normalizeMetric(metric)
+  if (norm.fraction !== undefined) {
+    if (norm.fraction < 0.6) return "good"
+    if (norm.fraction < 0.85) return "warn"
     return "bad"
   }
   if (metric.kind === "spent") return "neutral"
-  if (warnBelow !== undefined && Number.isFinite(warnBelow)) {
-    if (metric.value <= warnBelow) return "bad"
-    if (metric.value <= warnBelow * 2) return "warn"
+  if (warnBelow !== undefined && Number.isFinite(warnBelow) && norm.remaining !== undefined) {
+    if (norm.remaining <= warnBelow) return "bad"
+    if (norm.remaining <= warnBelow * 2) return "warn"
     return "good"
   }
   return "neutral"
 }
 
-function clamp01(x: number): number {
-  if (!Number.isFinite(x)) return 0
-  return Math.min(1, Math.max(0, x))
+function clamp(x: number, lo: number, hi: number): number {
+  if (!Number.isFinite(x)) return lo
+  return Math.min(hi, Math.max(lo, x))
 }
 
 // ---------- 格式化 ----------
 
-export function fmtMetricValue(metric: Metric): string {
-  switch (metric.kind) {
-    case "percent":
-      return `${Math.round(metric.value)}%`
-    case "amount":
-    case "spent":
-      return fmtMoney(metric.value, metric.unit ?? "")
-    case "count":
-      return `${fmtCompact(metric.value)}${metric.unit ? " " + metric.unit : ""}`
-  }
+/** 面板显示的是「还剩多少」还是「用了多少」。两种额度都按同一个口径显示。 */
+export type DisplayMode = "remaining" | "used"
+
+/**
+ * 一个数值 + 它的单位。百分比、金额、次数走同一个入口，
+ * 保证同一屏里的数字排版一致。
+ */
+export function fmtQuantity(value: number, unit: string, kind: MetricKind): string {
+  if (kind === "percent" || unit === "%") return `${Math.round(value)}%`
+  // 次数按紧凑写法（1.2K），金额按两位小数——不能只看有没有单位符号：
+  // 不带货币符号的金额如果走了紧凑写法，$3.46 会被显示成 3.5，凭空少掉几分钱。
+  if (kind === "count") return unit ? `${fmtCompact(value)} ${unit}` : fmtCompact(value)
+  return fmtMoney(value, unit)
 }
 
-/** 副标题：amount 有上限就写 "/ ¥100"，percent 有重置时间就写倒计时 */
-export function fmtMetricDetail(metric: Metric, now: number): string {
+/**
+ * 主数值。这是「统一」真正落地的地方：
+ *
+ * 无论 provider 报的是已用百分比还是剩余余额，这里都按用户选的同一个口径输出。
+ * 选「剩余」时，Claude 的「已用 42%」显示成「剩 58%」，和「余额 ¥12.5」并排读起来
+ * 方向一致——大数字都代表宽裕。
+ *
+ * 算不出所选口径时（已消费没有上限，就没有「剩余」可言）退回另一个口径，
+ * 并由 fmtMetricDetail 补一句说明，而不是显示一个空格或者 0。
+ */
+export function fmtMetricValue(metric: Metric, mode: DisplayMode = "remaining"): string {
+  const norm = normalizeMetric(metric)
+  const wanted = mode === "remaining" ? norm.remaining : norm.used
+  const fallback = mode === "remaining" ? norm.used : norm.remaining
+  const value = wanted ?? fallback ?? metric.value
+  return fmtQuantity(value, norm.unit, metric.kind)
+}
+
+/** 主数值到底是哪个口径。口径和所选不一致时要在界面上说出来。 */
+export function metricValueIsWanted(metric: Metric, mode: DisplayMode = "remaining"): boolean {
+  const norm = normalizeMetric(metric)
+  return (mode === "remaining" ? norm.remaining : norm.used) !== undefined
+}
+
+/**
+ * 副标题：把另一半信息补齐。
+ * 有上限就写「已用 42 / 100」，有重置时间就接倒计时。
+ */
+export function fmtMetricDetail(metric: Metric, now: number, mode: DisplayMode = "remaining"): string {
+  const norm = normalizeMetric(metric)
   const parts: string[] = []
-  if ((metric.kind === "amount" || metric.kind === "count") && metric.max !== undefined) {
-    parts.push(`/ ${metric.kind === "amount" ? fmtMoney(metric.max, metric.unit ?? "") : fmtCompact(metric.max)}`)
+
+  if (norm.total !== undefined && norm.used !== undefined) {
+    const shown = mode === "remaining" ? norm.used : norm.remaining ?? norm.used
+    const word = mode === "remaining" ? "已用" : "剩"
+    parts.push(
+      `${word} ${fmtQuantity(shown, norm.unit, metric.kind)} / ${fmtQuantity(norm.total, norm.unit, metric.kind)}`,
+    )
+  } else if (!metricValueIsWanted(metric, mode)) {
+    // 显示的不是所选口径，说明白它是什么，免得被当成剩余额度读
+    parts.push(norm.direction === "consumed" ? "已消费" : "剩余")
   }
+
   if (metric.resetAt !== undefined) parts.push(fmtReset(metric.resetAt, now))
   return parts.join(" · ")
 }
