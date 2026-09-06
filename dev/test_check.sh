@@ -29,6 +29,16 @@ console.log("这行永远不会跑")
 X
 expect_fail "Widget.present 之后还有代码" widget.tsx
 
+cat > "$TMP/widget.tsx" <<'X'
+import { Text, Widget } from "scripting"
+async function main() {
+  Widget.present(<Text>hi</Text>)
+  console.log("同一层，这行不会跑")
+}
+main()
+X
+expect_fail "present 之后同层还有代码（在函数里）" widget.tsx
+
 cat > "$TMP/a.tsx" <<'X'
 import { GeometryReader, Text } from "scripting"
 export function V() {
@@ -74,6 +84,22 @@ expect_fail "用了 Navigation 却没导入" e.tsx
 
 echo
 echo "== 不该误报的写法 =="
+cat > "$TMP/widget.tsx" <<'X'
+import { Text, Widget } from "scripting"
+async function main() {
+  Widget.present(<Text>hi</Text>)
+}
+main()
+X
+if python3 dev/check.py "$TMP" >/dev/null 2>&1; then
+  echo "  ok   present 在 async main 里、末尾 main() 不误报"
+else
+  echo "  FAIL 正确的 async main 写法被误报"
+  python3 dev/check.py "$TMP" || true
+  fail=1
+fi
+rm -f "$TMP/widget.tsx"
+
 cat > "$TMP/widget.tsx" <<'X'
 /**
  * 文档注释里的占位符不是 JSX：

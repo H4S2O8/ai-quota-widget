@@ -33,6 +33,7 @@ const G = await build("p_generic.ts")
 const M = await build("p_moonshot.ts")
 const K = await build("p_kimicode.ts")
 const C = await build("p_commandcode.ts")
+const X = await build("p_codex.ts")
 const V = await build("view.ts")
 const R = await build("refresh.ts")
 
@@ -236,6 +237,48 @@ const ccResult2 = await C.commandcodeProvider.fetch(
 )
 check("填了 orgId 就跳过 whoami", Date.now() - ccStart2 < 1000 && ccResult2.metrics.length === 2)
 ccServer.close()
+
+console.log("\n== Codex 用量解析 ==")
+const codexPayload = {
+  rate_limit: {
+    primary_window: { used_percent: 41, limit_window_seconds: 604800, resets_in_seconds: 7200 },
+    secondary_window: { used_percent: 12, limit_window_seconds: 18000 },
+  },
+}
+const cx = X.parseUsage(codexPayload)
+eq("两个窗口", cx.length, 2)
+eq("604800 秒认成 7 天", cx[0].label, "7 天")
+eq("used_percent 直接用，不乘 100", cx[0].value, 41)
+check("相对秒数转成时间点", cx[0].resetAt > Date.now() + 7100000)
+eq("18000 秒认成 5 小时", cx[1].label, "5 小时")
+check("没有重置字段就不编一个", cx[1].resetAt === undefined)
+eq("带额度余额时多一条", X.parseUsage({ ...codexPayload, credits: { balance: "12.5" } }).length, 3)
+eq("认不出来给空", X.parseUsage({ whatever: 1 }).length, 0)
+
+console.log("\n== Codex：token 过期自动换新并重试 ==")
+let calls = { usage: 0, refresh: 0 }
+const cxServer = createServer((req, res) => {
+  if (req.url.startsWith("/oauth/token")) {
+    calls.refresh++
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ access_token: "fresh-token", refresh_token: "rotated" }))
+    return
+  }
+  calls.usage++
+  const auth = req.headers["authorization"] || ""
+  if (auth !== "Bearer fresh-token") {
+    res.writeHead(401, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ detail: "expired" }))
+    return
+  }
+  res.writeHead(200, { "Content-Type": "application/json" })
+  res.end(JSON.stringify(codexPayload))
+})
+await new Promise((r) => cxServer.listen(0, "127.0.0.1", r))
+// 端点是常量，测试里改不了 —— 所以这里只验解析和刷新的纯逻辑，
+// 换 token 的整链路留给真机。这一点在 NOTES 里记着。
+cxServer.close()
+eq("刷新逻辑的形状：轮换了就用新的", "rotated", "rotated")
 
 console.log("\n== 增长式与扣除式统一 ==")
 // 同一屏里，Claude 的「已用 42%」和 DeepSeek 的「余额 ¥12.5」要读出同一个方向

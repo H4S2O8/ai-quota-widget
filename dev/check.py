@@ -64,19 +64,30 @@ RISKY = [
 
 
 def check_widget_present(path: pathlib.Path, src: str) -> int:
-    """Widget.present() 之后的代码永远不会执行。
+    """Widget.present() 之后、同一层级里不该再有代码。
 
-    文档写得很清楚：present 之后当前执行上下文立刻销毁。但写惯了 React 的人
-    会把「收尾」放在最后一行——诊断写入、日志、清理，全都不会跑，而且没有任何
-    报错。所以这一条单独查：present 必须是最后一个语句。
+    文档写得很清楚：present 之后当前执行上下文立刻销毁。但写惯 React 的人会把
+    「收尾」放在最后一行——诊断写入、日志、清理，全都不会跑，且没有任何报错。
+
+    判据必须是「同一层级」，不能是「文件末尾」。小组件里顶层 await 不可用
+    （会抛 ReferenceError: Can't find variable: await），所以正确的写法是把异步
+    动作收进 async main()、在里面调 present、最后在顶层调一次 main()——那个
+    main() 在 present 之后，但它在更外一层，是必需的。第一版规则按文件末尾判，
+    把这个正确写法判成了错误。
+
+    所以这里数花括号深度：只看和 present 调用同深度的后续语句。
     """
     if path.name != "widget.tsx":
         return 0
     at = src.find("Widget.present(")
     if at < 0:
         return 0
+
+    # present 调用所在的花括号深度
+    depth_at_call = src.count("{", 0, at) - src.count("}", 0, at)
+
+    # 跳过 present 自己那个调用（配平圆括号）
     tail = src[at:]
-    # 跳过 present 自己那个调用（配平括号），看后面还剩什么
     depth = 0
     end = None
     for i, c in enumerate(tail):
@@ -89,10 +100,26 @@ def check_widget_present(path: pathlib.Path, src: str) -> int:
                 break
     if end is None:
         return 0
-    rest = re.sub(r'//[^\n]*', '', tail[end:])
-    rest = re.sub(r'/\*.*?\*/', '', rest, flags=re.S).strip().strip(";")
-    if rest:
-        print(f"✗ {path.name}: Widget.present() 之后还有代码，它永远不会执行 -> {rest[:60]!r}")
+
+    rest = tail[end:]
+    # 在同深度内扫描；深度掉到 depth_at_call 以下就说明离开了这个块
+    d = depth_at_call
+    buf = []
+    for c in rest:
+        if c == "{":
+            d += 1
+        elif c == "}":
+            d -= 1
+            if d < depth_at_call:
+                break
+        if d == depth_at_call:
+            buf.append(c)
+    same_level = "".join(buf)
+    same_level = re.sub(r'//[^\n]*', '', same_level)
+    same_level = re.sub(r'/\*.*?\*/', '', same_level, flags=re.S)
+    same_level = same_level.strip().strip(";").strip()
+    if same_level:
+        print(f"✗ {path.name}: Widget.present() 之后的同层代码永远不会执行 -> {same_level[:60]!r}")
         return 1
     return 0
 

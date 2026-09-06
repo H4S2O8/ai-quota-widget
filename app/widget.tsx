@@ -30,47 +30,29 @@ import type { AccountRow } from "./view"
 import { buildRows, enabledRows, sortBySeverity, summarize } from "./view"
 import { fmtAgo, fmtReset } from "./util"
 
-// ---------- 准备数据 ----------
+// ---------- 状态 ----------
+//
+// 小组件脚本是**当作普通脚本求值的，不是模块**，所以顶层 `await` 会直接抛
+// `ReferenceError: Can't find variable: await`。所有异步动作必须收进一个
+// async 函数里，最后在那个函数内部调 Widget.present。
+//
+// （另一个项目里顶层 await 的写法我照抄了，没验证——这个平台上「别人那样写过」
+// 不等于「能用」。）
 
 const now = Date.now()
-const config = await loadConfig()
-let snapshot = await loadSnapshot()
-let selfRefreshed = false
-let note: string | undefined
 
-if (
-  config.settings.widgetSelfRefresh &&
-  config.accounts.some((a) => a.enabled) &&
-  isStale(snapshot, config.settings.refreshMinutes, now)
-) {
-  try {
-    // 小组件里不写配置，只写快照：config 的写入权归主 App，避免两个进程互相覆盖。
-    const outcome = await refreshAccounts(config, snapshot)
-    snapshot = outcome.snapshot
-    await saveSnapshot(snapshot)
-    selfRefreshed = true
-  } catch (error) {
-    note = `自刷新失败：${String(error)}`
-  }
-}
-
-const rows = sortBySeverity(enabledRows(buildRows(config, snapshot)))
-const totals = summarize(buildRows(config, snapshot))
+/** present 之前填好，组件只读它们。小组件只渲染一次，用不着 state。 */
+let rows: AccountRow[] = []
+let totals = { good: 0, warn: 0, bad: 0, failed: 0 }
+let updatedAt = 0
+let refreshMinutes = 15
 
 // Widget.family 的取值在文档里有两种写法（Quick Start 写 'small'，Widget API 写
 // 'systemSmall'）。两种都认，免得在某个版本上整块判空。
 const rawFamily = String(Widget.family ?? "")
 const family = rawFamily.replace(/^system/, "").toLowerCase()
 const isAccessory = family.startsWith("accessory")
-
-await writeWidgetDiag({
-  renderedAt: now,
-  family: rawFamily,
-  accountsSeen: rows.length,
-  selfRefreshed,
-  keychainReadable: probeKeychain(),
-  note,
-})
+const contentWidth = Math.max(80, (Widget.displaySize?.width ?? 160) - 28)
 
 // ---------- 组件 ----------
 
@@ -149,15 +131,13 @@ function Header({ trailing }: { trailing?: boolean }) {
         </Text>
       ) : (
         <Text font={10} foregroundStyle="tertiaryLabel">
-          {fmtAgo(snapshot.updatedAt, now)}
+          {fmtAgo(updatedAt, now)}
         </Text>
       )}
       {trailing ? (
-        <Button
-          intent={RefreshQuotaIntent(undefined)}
-          label={<Image systemName="arrow.clockwise" font={10} foregroundStyle="secondaryLabel" />}
-          buttonStyle="plain"
-        />
+        // 只是个可点提示，不是按钮 —— 整块小组件已经包在一个 Button 里了，
+        // 按钮套按钮在 WidgetKit 上行为未定义。
+        <Image systemName="hand.tap" font={9} foregroundStyle="tertiaryLabel" />
       ) : null}
     </HStack>
   )
@@ -175,8 +155,6 @@ function Empty({ compact }: { compact: boolean }) {
 }
 
 // ---------- 各尺寸 ----------
-
-const contentWidth = Math.max(80, (Widget.displaySize?.width ?? 160) - 28)
 
 function SmallView() {
   const row = rows[0]
@@ -210,7 +188,7 @@ function SmallView() {
       <Spacer />
 
       <Text font={9} foregroundStyle="tertiaryLabel" lineLimit={1}>
-        {metric?.resetAt ? fmtReset(metric.resetAt, now) : `${rows.length} 个账户 · ${fmtAgo(snapshot.updatedAt, now)}`}
+        {metric?.resetAt ? fmtReset(metric.resetAt, now) : `${rows.length} 个账户 · ${fmtAgo(updatedAt, now)}`}
       </Text>
     </VStack>
   )
@@ -315,20 +293,68 @@ function WidgetView() {
 }
 
 // 桌面小组件才画自己的底；锁屏的底交给系统。
-const body = isAccessory ? (
-  <WidgetView />
-) : (
-  <VStack
-    padding={14}
-    frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-    widgetBackground={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 20 } }}
-  >
-    <WidgetView />
-  </VStack>
-)
+function Body() {
+  if (isAccessory) return <WidgetView />
+  return (
+    <VStack
+      padding={14}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      widgetBackground={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 20 } }}
+    >
+      <WidgetView />
+    </VStack>
+  )
+}
 
-Widget.present(body, {
-  // 到下一个刷新周期再让系统回来要新时间线。iOS 会自己打折扣，这里只是给个意图。
-  policy: "after",
-  date: new Date(now + config.settings.refreshMinutes * 60000),
-})
+async function main() {
+  const config = await loadConfig()
+  let snapshot = await loadSnapshot()
+  refreshMinutes = config.settings.refreshMinutes
+  let selfRefreshed = false
+  let note: string | undefined
+
+  if (
+    config.settings.widgetSelfRefresh &&
+    config.accounts.some((a) => a.enabled) &&
+    isStale(snapshot, config.settings.refreshMinutes, now)
+  ) {
+    try {
+      // 小组件里不写配置，只写快照：config 的写入权归主 App，
+      // 避免两个进程互相覆盖。
+      const outcome = await refreshAccounts(config, snapshot)
+      snapshot = outcome.snapshot
+      await saveSnapshot(snapshot)
+      selfRefreshed = true
+    } catch (error) {
+      note = `自刷新失败：${String(error)}`
+    }
+  }
+
+  const all = buildRows(config, snapshot, now)
+  rows = sortBySeverity(enabledRows(all))
+  totals = summarize(all)
+  updatedAt = snapshot.updatedAt
+
+  // 诊断必须写在 present 之前 —— present 之后当前执行上下文立刻销毁。
+  await writeWidgetDiag({
+    renderedAt: now,
+    family: rawFamily,
+    accountsSeen: rows.length,
+    selfRefreshed,
+    keychainReadable: probeKeychain(),
+    note,
+  })
+
+  // 整块小组件就是一个刷新按钮：点一下跑 RefreshQuotaIntent，抓完 reloadAll。
+  // buttonStyle="plain" 是为了不让它长出按钮的边框和底色。
+  Widget.present(
+    <Button intent={RefreshQuotaIntent(undefined)} buttonStyle="plain" label={<Body />} />,
+    {
+      // 到下一个刷新周期再让系统回来要新时间线。iOS 会自己打折扣，这里只是给个意图。
+      policy: "after",
+      date: new Date(now + refreshMinutes * 60000),
+    },
+  )
+}
+
+main()

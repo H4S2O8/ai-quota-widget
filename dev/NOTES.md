@@ -173,6 +173,30 @@ releases/latest/download/AI-Quota.zip -> 200,  44KB, application/zip
 现在它包在 try/catch 里，超时上限也压到 6 秒——它只是来省个参数的，不值得让人
 等满一整个超时。回归测试直接让 whoami 吊死不回应，断言仍然出数。
 
+## 小组件里没有顶层 await
+
+真机报错：`ReferenceError: Can't find variable: await`。
+
+小组件脚本是**当作普通脚本求值的，不是 ES 模块**，所以顶层 `await` 直接不存在。
+所有异步动作必须收进一个 async 函数，在那个函数内部调 `Widget.present`，
+最后在顶层调一次那个函数。
+
+这条是照抄别人代码栽的跟头：另一个项目的 `widget.tsx` 顶层写着 `await openDB()`，
+我当成可用写法直接搬了。**「别人那样写过」不等于「能用」**——在这个平台上，
+唯一算数的是文档里的用例和真机跑通。官方的小组件示例全是同步的，这本身就是信号。
+
+连带改了 `dev/check.py` 里那条「present 之后不该有代码」的规则：它原来按文件末尾
+判，会把正确的 `main()` 收尾判成错误。现在按花括号深度判「同一层级」，
+`dev/test_check.sh` 里正反例都有。
+
+## 小组件点击 = 刷新
+
+整块小组件包在一个 `Button` 里，`intent` 是 `RefreshQuotaIntent`，
+`buttonStyle="plain"` 免得长出按钮边框。头部原来那个小刷新按钮删了——
+按钮套按钮在 WidgetKit 上行为未定义，现在那里只留一个 `hand.tap` 图标作提示。
+
+代价是点小组件不再打开 App。这是用户明确要的取舍。
+
 ## 待验证（只能在真机上做）
 
 按重要性排：
@@ -181,16 +205,18 @@ releases/latest/download/AI-Quota.zip -> 200,  44KB, application/zip
    之前那版（GitHub tree 网页）是确定不工作的，新的这版没有重定向、返回真 zip、
    根目录第一项就是 script.json，形状上都对，但只有真机能证明。
    装上之后看诊断页的版本号。
-2. **小组件能不能读 App Group 目录里的配置。** 整个数据共享都压在这上面。
+2. **点击小组件是否真的触发刷新并重画。** AppIntent + reloadAll 之后 WidgetKit
+   什么时候回来是系统说了算。
+3. **小组件能不能读 App Group 目录里的配置。** 整个数据共享都压在这上面。
    看诊断页的「小组件上次渲染 → 读到账户」是不是非 0。
-3. **小组件自刷新会不会被 iOS 掐掉。** 扩展进程有时间和内存限制（约 30MB），
+4. **小组件自刷新会不会被 iOS 掐掉。** 扩展进程有时间和内存限制（约 30MB），
    一次抓 4 个账户是否安全没验过。真被掐了就把「小组件自行刷新」关掉，
    靠打开 App 或点小组件上的刷新按钮更新。
-4. **AppIntent 刷新按钮是否真的重画。** `Widget.reloadAll()` 之后 WidgetKit 什么时候
+5. **AppIntent 刷新按钮是否真的重画。** `Widget.reloadAll()` 之后 WidgetKit 什么时候
    回来是系统说了算。
-5. **`widgetBackground` 传 shape 对象在着色模式下的表现。**
-6. **小组件里 Keychain 读不读得到**（探针会自己回答，看诊断页）。
-7. **`refreshable` 下拉刷新**在 List 上是否生效。
+6. **`widgetBackground` 传 shape 对象在着色模式下的表现。**
+7. **小组件里 Keychain 读不读得到**（探针会自己回答，看诊断页）。
+8. **`refreshable` 下拉刷新**在 List 上是否生效。
 
 踩到新的坑，往 `dev/check.py` 的 RISKY 里加一条，再往 `dev/test_check.sh` 里加一个
 反例。记在文档里的坑会被忘记，写进脚本的不会。
