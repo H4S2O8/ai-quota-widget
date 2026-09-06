@@ -1,0 +1,123 @@
+# AI 额度面板（Scripting 小组件）
+
+在 iPhone 桌面上一眼看到各家 AI 服务还剩多少额度。用
+[Scripting](https://scripting.fun) 的 TSX + SwiftUI 组件写成。
+
+仓库：<https://github.com/H4S2O8/ai-quota-widget>
+
+一屏回答一个问题：**哪个快用完了。** 排序按紧张程度，不按你添加的顺序——
+出错的排最前，快用完的排第二，宽裕的沉底。
+
+## 装
+
+1. 下载仓库里的 `AI-Quota.scripting`，在 iPhone 上用 Scripting 打开即可导入
+   （AirDrop 过去最省事）。自己改过代码就跑 `dev/pack.sh` 重新打包。
+   `app/script.json` 里已经配好 `remoteResource`，装上之后每小时自己拉一次更新——
+   fork 之后记得把那个 URL 改成你自己的仓库。
+2. 打开脚本 → 「添加账户」 → 选服务商 → 填凭据 → 点「现在抓取」确认能通。
+3. 桌面长按 → 添加 Scripting 小组件 → 编辑小组件 → 选「AI 额度」。
+
+## 内置服务商
+
+| 服务商 | 拿什么 | 需要填 |
+| --- | --- | --- |
+| Claude 订阅 | 5 小时 / 7 天 / 7 天 Opus 窗口的已用比例 | OAuth access token（`sk-ant-oat...`） |
+| OpenRouter | 账户余额，以及这把 key 自己的限额 | API Key |
+| DeepSeek | 余额（CNY / USD 分开列） | API Key |
+| 硅基流动 | 总余额，赠送与充值分开显示 | API Key |
+| Moonshot / Kimi | 可用余额、现金、代金券 | API Key |
+| OpenAI 兼容中转站 | 剩余额度与已消费 | 站点地址 + 系统访问令牌 |
+| 自定义 JSON 接口 | 你指定的任意字段 | URL、请求头、JSON 路径 |
+
+前五个用的是各家公开文档里的接口。**Claude 那个不是公开接口**，返回结构是推断的，
+详见 `dev/NOTES.md`。
+
+六个接口都用无效凭据探过活（返回 401 而不是 404，说明路径和鉴权方式对）。
+但字段名对不对，只有拿真实凭据抓一次才知道——所以每个账户页都有「现在抓取」，
+抓完把原始响应原样贴出来给你对。
+
+## 小组件
+
+| 尺寸 | 显示 |
+| --- | --- |
+| 小 | 最紧张的那一个：数值、比例条、重置倒计时 |
+| 中 | 最多 4 个账户，每个一行加一条比例条，右上角带刷新按钮 |
+| 大 | 最多 7 个账户，每个展开到 3 项指标 |
+| 锁屏矩形 | 一行：账户名 + 数值 + 倒计时 |
+| 锁屏圆形 | 一个环 |
+
+小组件默认会在数据过期时**自己联网抓**（间隔可在设置里改，默认 15 分钟）。
+不想让它联网就在设置里关掉，那样它只显示 App 抓来的缓存。
+
+iOS 对小组件刷新有自己的配额，设得再短系统也不保证照做。
+
+## 加一个服务商
+
+新建 `app/p_yourservice.ts`：
+
+```ts
+import type { Provider } from "./types"
+import { describeHttpError, getPath, num, requestJson } from "./util"
+
+export const yourProvider: Provider = {
+  id: "yourservice",          // 别改，它写进了用户的配置
+  name: "你的服务",
+  icon: "bolt.fill",          // SF Symbol
+  color: "#FF6B00",
+  help: "去哪儿拿 key，一句话说清。",
+  fields: [
+    { key: "apiKey", label: "API Key", secret: true, required: true },
+  ],
+  async fetch(config, ctx) {
+    const resp = await requestJson(
+      "https://api.example.com/balance",
+      { headers: { Authorization: `Bearer ${config.apiKey}` } },
+      ctx.timeoutSec,
+    )
+    if (!resp.ok) throw new Error(describeHttpError(resp))
+    return {
+      metrics: [{
+        id: "balance",
+        label: "余额",
+        kind: "amount",                                  // amount / count / percent / spent
+        value: num(getPath(resp.json, "data.balance")) ?? 0,
+        unit: "¥",
+      }],
+    }
+  },
+}
+```
+
+在 `app/providers.ts` 的 `PROVIDERS` 里加一行，`script.json` 的 `version` 加一。
+**界面不用改**：设置页按 `fields` 自动长出表单，小组件按 `Metric` 自动排版。
+
+三条约定：
+
+- **`id` 不能改**，它是用户配置里的外键。
+- **拿不到数就抛错，不要返回 0。** 一个绿色的「余额 0」比一条红色的错误更贵，
+  因为它看起来像正常工作。
+- **靠推断解析的接口要调 `ctx.captureRaw(text)`**，字段猜错时才有原文可看。
+
+只是接口形状不同、不值得写代码的服务，直接用内置的「自定义 JSON 接口」配置，
+不用改一行代码。
+
+## 凭据存在哪
+
+和配置一起放在 App Group 容器的 `config.json` 里，明文。这个目录在「文件」App 里
+看不到，别的 App 也读不到，但它不是 Keychain。
+
+这么选是因为小组件跑在独立进程里，Keychain 在那边读不读得到没有文档用例——
+猜错的话症状是「小组件自刷新静默不工作」。项目里埋了探针去验这件事，
+结论显示在诊断页的「能读 Keychain」那一行。验实了再搬。
+
+## 开发
+
+```sh
+./dev/test.sh              # 静态检查 + 检查器自检 + 打包 + 逻辑测试（不需要手机）
+./dev/probe_endpoints.sh   # 各服务商接口还在不在
+./dev/pack.sh              # 打包
+```
+
+改完记得 `app/script.json` 的 `version` 加一，否则手机不更新。
+
+平台的坑、分层的理由、以及真机上还没验的清单，见 `dev/NOTES.md`。
