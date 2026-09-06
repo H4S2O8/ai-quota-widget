@@ -25,6 +25,7 @@
 import {
   Button,
   HStack,
+  Link,
   Image,
   Script,
   Spacer,
@@ -56,8 +57,8 @@ let rows: AccountRow[] = []
 let totals = { good: 0, warn: 0, bad: 0, failed: 0 }
 let updatedAt = 0
 let refreshMinutes = 15
-/** 整块可点时不再画角落那个按钮 —— 按钮套按钮在 WidgetKit 上行为未定义。 */
-let wholeWidgetTaps = true
+/** 点击行为。整块可点时不画角落那个按钮 —— 按钮套按钮在 WidgetKit 上行为未定义。 */
+let tapMode: "open" | "button" | "link" = "open"
 
 // ---------- 组件 ----------
 
@@ -139,7 +140,7 @@ function Header({ trailing }: { trailing?: boolean }) {
           {fmtAgo(updatedAt, now)}
         </Text>
       )}
-      {trailing && !wholeWidgetTaps ? <RefreshButton /> : null}
+      {trailing && tapMode === "open" ? <RefreshButton /> : null}
     </HStack>
   )
 }
@@ -210,7 +211,7 @@ function SmallView() {
           {metric?.resetAt ? fmtReset(metric.resetAt, now) : `${rows.length} 个账户 · ${fmtAgo(updatedAt, now)}`}
         </Text>
         <Spacer />
-        {wholeWidgetTaps ? null : <RefreshButton />}
+        {tapMode === "open" ? <RefreshButton /> : null}
       </HStack>
     </VStack>
   )
@@ -315,6 +316,17 @@ function WidgetView() {
 }
 
 // 桌面小组件才画自己的底；锁屏的底交给系统。
+/** 内容本体，不带背景。button 模式下由外层容器画底，免得叠两层。 */
+function Inner() {
+  if (isAccessory) return <WidgetView />
+  return (
+    <VStack padding={14} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+      <WidgetView />
+    </VStack>
+  )
+}
+
+/** 内容 + 背景。open / link 两种模式直接用它。 */
 function Body() {
   if (isAccessory) return <WidgetView />
   return (
@@ -349,7 +361,7 @@ try {
   const config = loadConfigSync()
   const snapshot = loadSnapshotSync()
   refreshMinutes = config.settings.refreshMinutes
-  wholeWidgetTaps = config.settings.widgetTap !== "open"
+  tapMode = config.settings.widgetTap
 
   const all = buildRows(config, snapshot, now)
   rows = sortBySeverity(enabledRows(all))
@@ -365,17 +377,34 @@ try {
     keychainReadable: probeKeychain(),
   })
 
-  // 整块小组件就是刷新按钮：点哪儿都触发 RefreshQuotaIntent。
-  // buttonStyle="plain" 是为了不让它长出按钮的边框和底色。
+  // 「整块可点」在这个平台上没有确定可用的写法，所以三种实现按设置切。
   //
-  // label / plain / intent 每一件都是文档化的，但这个组合没有用例。所以留了
-  // 设置开关：万一某个版本上渲染不出来，用户能自己切回「点击打开脚本」，
-  // 不用等我发新版。
-  const presented = wholeWidgetTaps ? (
-    <Button intent={RefreshQuotaIntent(undefined)} buttonStyle="plain" label={<Body />} />
-  ) : (
-    <Body />
-  )
+  // 实测记录（别删，省得以后再试一遍）：
+  //   把 Button 当作 present 的**根视图** -> 真机一片漆黑。
+  //   所以 button 模式是「根容器里套一个撑满的 Button」，更接近文档示例的形状。
+  let presented = <Body />
+  if (tapMode === "button") {
+    presented = (
+      <VStack
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        widgetBackground={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 20 } }}
+      >
+        <Button
+          intent={RefreshQuotaIntent(undefined)}
+          buttonStyle="plain"
+          label={<Inner />}
+        />
+      </VStack>
+    )
+  } else if (tapMode === "link") {
+    // Link 收自定义布局是文档化的，小组件里也有明确说明（它会让 widgetURL 失效）。
+    // run_single 保证不会开出一堆实例；action=refresh 由 index.tsx 认，抓完就退出。
+    presented = (
+      <Link url={Script.createRunSingleURLScheme(Script.name, { action: "refresh" })}>
+        <Body />
+      </Link>
+    )
+  }
 
   Widget.present(presented, {
     // 到下一个刷新周期再让系统回来要新时间线。iOS 会自己打折扣，这里只是给个意图。

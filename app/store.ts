@@ -142,7 +142,10 @@ function normalizeSettings(raw: Partial<Settings> | undefined): Settings {
   return {
     refreshMinutes: Number.isFinite(minutes) ? Math.min(720, Math.max(5, minutes)) : DEFAULT_SETTINGS.refreshMinutes,
     autoRefreshOnOpen: value.autoRefreshOnOpen !== false,
-    widgetTap: value.widgetTap === "open" ? "open" : DEFAULT_SETTINGS.widgetTap,
+    widgetTap:
+      value.widgetTap === "button" || value.widgetTap === "link"
+        ? value.widgetTap
+        : DEFAULT_SETTINGS.widgetTap,
     timeoutSec: Number.isFinite(timeout) ? Math.min(60, Math.max(5, timeout)) : DEFAULT_SETTINGS.timeoutSec,
     displayMode: value.displayMode === "used" ? "used" : DEFAULT_SETTINGS.displayMode,
   }

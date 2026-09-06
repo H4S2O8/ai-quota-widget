@@ -211,7 +211,29 @@ present，时机上已经太晚，小组件拿不到内容。
 判，会把正确的 `main()` 收尾判成错误。现在按花括号深度判「同一层级」，
 `dev/test_check.sh` 里正反例都有。
 
-## 小组件点击 = 刷新（整块可点）
+## 「整块小组件可点」没有确定可用的写法
+
+实测记录，别删，省得以后再试一遍：
+
+| 写法 | 结果 |
+| --- | --- |
+| `Widget.present(<Button label={<Body/>} buttonStyle="plain" intent={...} />)` | **一片漆黑** |
+| `Widget.present(<Body/>)`，容器里放一个 title+systemImage 的 Button | 正常显示 |
+
+第一种失败时 `widget.tsx` 已经全程同步了，所以能确定不是异步的问题——
+**Button 作为 present 的根视图渲染不出来**。文档的交互式小组件示例里，Button
+永远是放在 `VStack` 里面的，从来不是根视图；那个细节当时被我忽略了。
+
+现在 `settings.widgetTap` 是三选一：
+
+- `open`（默认）—— 不包裹，系统默认行为，角落一个刷新按钮。**唯一确认能显示的**
+- `button` —— 根容器里套一个撑满的 Button（比「Button 当根视图」更接近文档形状）
+- `link` —— `<Link url={run_single?action=refresh}>` 包住内容，`index.tsx` 认这个参数，
+  抓完直接 `Script.exit()` 不展示界面。Link 收自定义布局是文档化的，代价是会切一下 App
+
+默认必须是 `open`：整块可点已经让这个小组件黑过一次，默认不能是没把握的那个。
+
+## 旧记录：小组件点击 = 刷新（整块可点）
 
 `Widget.present` 传的是 `<Button intent={RefreshQuotaIntent(...)} buttonStyle="plain"
 label={<Body/>} />`，整块都是按钮。

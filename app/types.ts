@@ -110,16 +110,21 @@ export interface Settings {
    */
   autoRefreshOnOpen: boolean
   /**
-   * 点小组件干什么。
+   * 点小组件干什么。三种实现方式，因为「整块可点」在这个平台上没有确定可用的写法。
    *
-   * `refresh`（默认）—— 整块小组件是一个按钮，点哪儿都是刷新。
-   * `open`     —— 不包按钮，点击走系统默认（打开脚本），右上角另给一个刷新按钮。
+   * `open`（默认）—— 不做任何包裹，点击走系统默认（打开脚本），右上角另给一个
+   *                   刷新按钮。**这是唯一确认能渲染的**。
+   * `button`      —— 根容器内放一个撑满的 Button（AppIntent 后台刷新，不切 App）。
+   *                   注意：把 Button 当作 present 的**根视图**实测会一片漆黑，
+   *                   所以这里是「容器里套 Button」，更接近文档示例的形状。
+   * `link`        —— 用 Link 包住内容（Link 收自定义布局是文档化的），点开
+   *                   scripting://run_single 带 action=refresh，主脚本抓完直接退出。
+   *                   代价是会短暂切到 Scripting App。
    *
-   * 做成开关不是为了花哨：整块包 Button 用到的是 `label` + `buttonStyle="plain"`，
-   * 每一件都是文档化的，但这个组合没有用例。万一它在某个版本上渲染不出来，
-   * 用户能自己在 App 里切回去，不用等我发新版。
+   * 默认给 open 不是偷懒：整块可点已经让这个小组件黑过一次，默认必须是确定能
+   * 显示的那个。想要点击刷新就在设置里切，切错了也能切回来。
    */
-  widgetTap: "refresh" | "open"
+  widgetTap: "open" | "button" | "link"
   /** 单个账户的请求超时（秒） */
   timeoutSec: number
   /**
@@ -158,7 +163,7 @@ export interface Snapshot {
 export const DEFAULT_SETTINGS: Settings = {
   refreshMinutes: 15,
   autoRefreshOnOpen: true,
-  widgetTap: "refresh",
+  widgetTap: "open",
   timeoutSec: 15,
   displayMode: "remaining",
 }

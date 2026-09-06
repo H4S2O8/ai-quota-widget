@@ -258,16 +258,23 @@ function SettingsPage({
           <Picker
             title="点小组件时"
             value={settings.widgetTap}
-            onChanged={(value: string) => patch({ widgetTap: value === "open" ? "open" : "refresh" })}
+            onChanged={(value: string) =>
+              patch({
+                widgetTap: value === "button" || value === "link" ? value : "open",
+              })
+            }
             pickerStyle="segmented"
           >
-            <Text tag="refresh">刷新额度</Text>
             <Text tag="open">打开脚本</Text>
+            <Text tag="button">刷新·按钮</Text>
+            <Text tag="link">刷新·链接</Text>
           </Picker>
           <Text font={11} foregroundStyle="tertiaryLabel">
-            {settings.widgetTap === "open"
-              ? "点小组件打开脚本；小组件右上角另有一个刷新按钮。"
-              : "整块小组件都是刷新按钮，点哪儿都会重新抓一遍。如果小组件因此显示不出来，切到「打开脚本」即可恢复。"}
+            {settings.widgetTap === "button"
+              ? "整块小组件是个按钮，点哪儿都后台刷新，不切 App。这个写法官方没有用例——如果小组件因此一片漆黑，切回「打开脚本」就能恢复显示。"
+              : settings.widgetTap === "link"
+                ? "点小组件会短暂切到 Scripting 抓一遍数据然后自动退出。切 App 是它的代价，好处是用的是文档化的写法。"
+                : "点小组件打开脚本（系统默认行为），右上角另有一个刷新按钮。这是唯一确认能正常显示的模式。"}
           </Text>
 
           <Toggle
@@ -645,7 +652,31 @@ function MainView() {
   )
 }
 
+/**
+ * 被小组件的 link 模式拉起来时，只刷新，不开界面。
+ *
+ * 小组件的「点击=刷新」有三种实现，link 那种是打开
+ * `scripting://run_single/<脚本名>?action=refresh`。走到这里说明用户点的是小组件，
+ * 他要的是新数字，不是这个 App 的界面——抓完、让小组件重画、立刻退出。
+ */
+async function runRefreshOnly() {
+  try {
+    const config = await loadConfig()
+    const snapshot = await loadSnapshot()
+    const outcome = await refreshAccounts(config, snapshot)
+    await saveSnapshot(outcome.snapshot)
+  } catch {
+    // 静默失败也比把用户丢进一个他没想打开的界面强；下次点还会再试
+  }
+  Widget.reloadAll()
+  Script.exit()
+}
+
 async function run() {
+  if (Script.queryParameters?.action === "refresh") {
+    await runRefreshOnly()
+    return
+  }
   Script.enableMinimize()
   await Navigation.present({ element: <MainView /> })
   Script.exit()
