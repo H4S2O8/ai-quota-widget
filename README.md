@@ -10,10 +10,21 @@
 
 ## 装
 
-1. 下载仓库里的 `AI-Quota.scripting`，在 iPhone 上用 Scripting 打开即可导入
-   （AirDrop 过去最省事）。自己改过代码就跑 `dev/pack.sh` 重新打包。
-   `app/script.json` 里已经配好 `remoteResource`，装上之后每小时自己拉一次更新——
-   fork 之后记得把那个 URL 改成你自己的仓库。
+1. 从 [Releases](https://github.com/H4S2O8/ai-quota-widget/releases/latest) 下载，
+   在 iPhone 上用 Scripting 打开即可导入。两个附件字节相同，按你的导入方式挑：
+
+   | 导入方式 | 用哪个 |
+   | --- | --- |
+   | 下载文件后打开 / AirDrop | `AI-Quota.scripting` |
+   | Scripting 里「从 URL 导入」 | `AI-Quota.zip` 的下载直链 |
+
+   **别在 GitHub 网页上直接点文件名下载**——那样存下来的是 HTML 页面，
+   导入会报「不支持的脚本文件」。要用 Releases 里的链接，或文件页右上角的
+   「Download raw file」。
+
+   自己改过代码就跑 `dev/pack.sh` 重新打包。`app/script.json` 里配好了
+   `remoteResource`，装上之后每小时自己拉一次更新——fork 之后记得把那个 URL
+   改成你自己的仓库，并且**每次改完代码要把 `version` 加一**，否则手机不更新。
 2. 打开脚本 → 「添加账户」 → 选服务商 → 填凭据 → 点「现在抓取」确认能通。
 3. 桌面长按 → 添加 Scripting 小组件 → 编辑小组件 → 选「AI 额度」。
 
