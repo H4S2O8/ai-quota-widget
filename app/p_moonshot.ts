@@ -6,15 +6,28 @@
  *
  * available_balance 可能大于 cash_balance（代金券先扣），所以主指标用它。
  *
- * ## 为什么要选站点
+ * ## 这个接口读的是「开放平台余额」，只有它
  *
- * Kimi 有国内站（api.moonshot.cn）和国际站（api.moonshot.ai），**两套账号、两套
- * key，路径完全一样**。拿国内站的 key 去打国际站，返回的是 401 Invalid
- * Authentication —— 和「key 打错了」的报错一模一样，看不出区别。
+ * Kimi 有三个互不相通的产品，官方问题排查页写得很直白：
  *
- * 这是实测：两个域名都用同一个无效 key 探过，401 的报文逐字相同。所以域名写死
- * 在代码里的话，站点选错的人会盯着一个「凭据无效」的提示反复检查 key，
- * 而 key 从头到尾都是对的。
+ *   - **Kimi API 开放平台**（platform.kimi.com）：按量付费，有余额，就是这里读的
+ *   - **Kimi Code**：独立编程产品，自己的 Key，和开放平台不通用
+ *   - **Kimi 会员**（kimi.com 的订阅）：权益不折算成开放平台余额
+ *
+ * 「把其他产品的 Key 填到开放平台端点，会出现 401 或 404」——原话。所以拿
+ * kimi.com 的会员身份或 Kimi Code 的 Key 来填，必然 401，而且和「Key 写错了」
+ * 的报错一模一样。**会员和 Kimi Code 的订阅用量没有公开接口，这个 provider
+ * 读不了，任何 provider 都读不了。**
+ *
+ * ## 区域也隔离
+ *
+ * 中国站 platform.kimi.com（端点 api.moonshot.cn）和国际站 platform.kimi.ai
+ * （端点 api.moonshot.ai）账户、余额、Key 相互隔离。两个端点对同一个无效 Key
+ * 返回的 401 报文逐字相同，所以域名不能写死——站点选错的人会盯着一把没问题的
+ * Key 反复检查。
+ *
+ * 以上两条都不是推测：`docs/guide/faq` 和 `docs/api/balance` 里写着，
+ * 端点也逐个探过。
  */
 import type { Provider, ProviderResult } from "./types"
 import { describeHttpError, getPath, num, requestJson } from "./util"
@@ -28,9 +41,9 @@ export const moonshotProvider: Provider = {
   icon: "moon.stars",
   color: "#0F172A",
   help:
-    "开放平台的 API Key（sk-...），不是 Kimi 助手的登录账号。" +
-    "国内站在 platform.moonshot.cn，国际站在 platform.moonshot.ai —— " +
-    "key 是哪个站建的，下面就要选哪个，选错了报的也是 401。",
+    "只认 Kimi API 开放平台的 Key，在 platform.kimi.com（国际站 platform.kimi.ai）" +
+    "的用户中心创建。kimi.com 的会员订阅和 Kimi Code 是另外两个产品，Key 不通用、" +
+    "余额也不互通，拿它们来填会报 401，而且那份订阅用量没有公开接口，读不出来。",
   fields: [
     { key: "apiKey", label: "API Key", secret: true, required: true, placeholder: "sk-..." },
     {
@@ -52,10 +65,15 @@ export const moonshotProvider: Provider = {
     if (resp.status === 401 || resp.status === 403) {
       // 两个站的 401 报文一样，所以这里必须把「可能是站点选错」说出来，
       // 否则用户只会反复去检查那把其实没问题的 key。
-      const other = base === CN ? "国际站（site 填 global）" : "国内站（site 填 cn）"
+      // 官方 FAQ 把 401 的成因按可能性排过序，这里照抄那个顺序。笼统一句
+      // 「凭据无效」会让人去反复检查一把其实正确的 Key。
+      const other = base === CN ? "国际站（站点填 global）" : "国内站（站点填 cn）"
       throw new Error(
-        `凭据被拒 (${resp.status})。当前打的是 ${base}；如果这把 key 是在${other}建的，` +
-          `换过去再试——两个站的报错一模一样。`,
+        `凭据被拒 (${resp.status})，当前打的是 ${base}。按这个顺序查：` +
+          `① Key 是不是「Kimi API 开放平台」建的——kimi.com 的会员订阅和 Kimi Code ` +
+          `各是独立产品，Key 不通用，填过来就是这个报错；` +
+          `② 是不是${other}的 Key，两个区域相互隔离且报错一模一样；` +
+          `③ 账户有没有可用余额。`,
       )
     }
     if (!resp.ok) throw new Error(describeHttpError(resp, "读取余额失败"))
