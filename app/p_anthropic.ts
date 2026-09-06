@@ -24,6 +24,7 @@ import { describeHttpError, getPath, num, toEpochMs, windowLabel } from "./util"
 const WINDOWS: { keys: string[]; label: string }[] = [
   { keys: ["five_hour", "fiveHour", "5h", "session"], label: "5 小时" },
   { keys: ["seven_day", "sevenDay", "7d", "week", "weekly"], label: "7 天" },
+  { keys: ["seven_day_sonnet", "sevenDaySonnet", "7d_sonnet"], label: "7 天 Sonnet" },
   { keys: ["seven_day_opus", "sevenDayOpus", "7d_opus", "weekly_opus"], label: "7 天 Opus" },
   { keys: ["seven_day_oauth_apps", "sevenDayOauthApps"], label: "7 天 · 第三方应用" },
 ]

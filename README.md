@@ -37,20 +37,26 @@
 | DeepSeek | 余额（CNY / USD 分开列） | API Key |
 | 硅基流动 | 总余额，赠送与充值分开显示 | API Key |
 | Moonshot / Kimi | 开放平台可用余额、现金、代金券 | 开放平台 API Key + 站点 |
+| Kimi Code | 订阅的 5 小时 / 7 天额度窗口 | Kimi Code 控制台的 `sk-kimi-` Key |
 | OpenAI 兼容中转站 | 剩余额度与已消费 | 站点地址 + 系统访问令牌 |
 | 自定义 JSON 接口 | 你指定的任意字段 | URL、请求头、JSON 路径 |
 
 前五个用的是各家公开文档里的接口。**Claude 那个不是公开接口**，返回结构是推断的，
 详见 `dev/NOTES.md`。
 
-**Kimi 要注意**：只有「Kimi API 开放平台」（按量付费）有余额接口。kimi.com 的
-**会员订阅**和 **Kimi Code** 是另外两个产品，Key 不通用、余额不互通，填过来会报 401；
-它们的订阅用量没有公开接口，读不出来。中国站 `platform.kimi.com` 和国际站
-`platform.kimi.ai` 也相互隔离，账户页的「站点」字段要选对。
+**Kimi 有三个互不相通的产品**，别拿错 Key：
 
-六个接口都用无效凭据探过活（返回 401 而不是 404，说明路径和鉴权方式对）。
-但字段名对不对，只有拿真实凭据抓一次才知道——所以每个账户页都有「现在抓取」，
-抓完把原始响应原样贴出来给你对。
+| 产品 | 计费 | 用哪个账户类型 | Key 格式 |
+| --- | --- | --- | --- |
+| Kimi API 开放平台 | 按量付费 | 「Moonshot / Kimi」 | `sk-...` |
+| Kimi Code | 订阅制 | 「Kimi Code」 | `sk-kimi-...` |
+| Kimi 会员（kimi.com） | 订阅制 | **读不了**，见下 | — |
+
+官方问题排查页原话：三者「付费方式、余额/权益和 API Key 均不通用」，填错了会 401 或 404。
+开放平台还分中国站 `platform.kimi.com` 和国际站 `platform.kimi.ai`，账户相互隔离。
+
+**Kimi 会员的用量这个面板读不到。** 它没有 API——参考实现 kimi-code-usage 是靠浏览器
+扩展抓 `kimi.com/membership/subscription` 这个网页拿到的，那条路在 iPhone 小组件里走不通。
 
 ## 小组件
 

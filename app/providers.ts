@@ -23,6 +23,7 @@
 import { anthropicProvider } from "./p_anthropic"
 import { deepseekProvider } from "./p_deepseek"
 import { genericProvider } from "./p_generic"
+import { kimicodeProvider } from "./p_kimicode"
 import { moonshotProvider } from "./p_moonshot"
 import { oneapiProvider } from "./p_oneapi"
 import { openrouterProvider } from "./p_openrouter"
@@ -36,6 +37,7 @@ export const PROVIDERS: Provider[] = [
   deepseekProvider,
   siliconflowProvider,
   moonshotProvider,
+  kimicodeProvider,
   oneapiProvider,
   genericProvider,
 ]

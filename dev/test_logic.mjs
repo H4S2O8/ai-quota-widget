@@ -31,6 +31,7 @@ const U = await build("util.ts")
 const A = await build("p_anthropic.ts")
 const G = await build("p_generic.ts")
 const M = await build("p_moonshot.ts")
+const K = await build("p_kimicode.ts")
 const V = await build("view.ts")
 const R = await build("refresh.ts")
 
@@ -122,6 +123,57 @@ eq("大小写与空格", M.resolveBase("  Global "), "https://api.moonshot.ai")
 eq("中文也认", M.resolveBase("国际站"), "https://api.moonshot.ai")
 eq("写全域名就用它", M.resolveBase("https://api.example.com/"), "https://api.example.com")
 eq("认不出来的退回国内站", M.resolveBase("火星"), "https://api.moonshot.cn")
+
+console.log("\n== Kimi Code 用量解析 ==")
+// 形状 A：data 数组，model_name === "all" 是周汇总
+const shapeA = {
+  data: [
+    { model_name: "kimi-k3", limit: 100, used: 30 },
+    { model_name: "all", limit: 1000, used: 400, resetTime: "2026-01-08T00:00:00Z" },
+  ],
+}
+const a = K.parseUsages(shapeA)
+eq("两条都认出来", a.length, 2)
+eq("周汇总排最前", a[0].label, "周额度")
+eq("周汇总显示剩余量", a[0].value, 600)
+eq("上限就是 limit", a[0].max, 1000)
+eq("重置时间", a[0].resetAt, Date.parse("2026-01-08T00:00:00Z"))
+eq("分模型那条排后面", a[1].label, "kimi-k3")
+eq("分模型剩余量", a[1].value, 70)
+// 形状 B：usage + limits[{detail, window}]
+const shapeB = {
+  usage: { limit: 500, used: 100 },
+  limits: [
+    { window: { duration: 300, timeUnit: "MINUTE" }, detail: { limit: 50, remaining: 12 } },
+    { window: { duration: 7, timeUnit: "DAY" }, detail: { limit: 200, used: 20 } },
+  ],
+}
+const b = K.parseUsages(shapeB)
+eq("三条都认出来", b.length, 3)
+eq("usage 是周额度", b[0].label, "周额度")
+eq("300 分钟折成 5 小时", b[1].label, "5 小时额度")
+eq("有 remaining 就直接用", b[1].value, 12)
+eq("7 天窗口", b[2].label, "7 天额度")
+eq("没 remaining 就用 limit-used", b[2].value, 180)
+// 兜底
+eq("认不出来给空数组", K.parseUsages({ nothing: 1 }).length, 0)
+eq("空 data 给空数组", K.parseUsages({ data: [] }).length, 0)
+eq("窗口没 duration 时的名字", K.windowName({}, 2), "额度 3")
+eq("小时单位", K.windowName({ duration: 5, timeUnit: "HOUR" }, 0), "5 小时额度")
+// reset_in 是相对秒数，要转成时间点
+const rel = K.parseUsages({ data: [{ model_name: "all", limit: 10, used: 1, reset_in: 3600 }] })
+check("reset_in 转成了将来的时间点", rel[0].resetAt > Date.now() + 3500000)
+
+console.log("\n== Claude 窗口（对齐 kimi-code-usage 的实现）==")
+const claudeFour = A.parseUsage({
+  five_hour: { utilization: 0.1 },
+  seven_day: { utilization: 0.2 },
+  seven_day_sonnet: { utilization: 0.3 },
+  seven_day_opus: { utilization: 0.4 },
+})
+eq("四个窗口都认", claudeFour.length, 4)
+eq("Sonnet 窗口有名字", claudeFour[2].label, "7 天 Sonnet")
+eq("Sonnet 比例乘了 100", claudeFour[2].value, 30)
 
 console.log("\n== 视图模型 ==")
 const config = {
