@@ -112,6 +112,25 @@ rm -f "$TMP/widget.tsx"
 
 cat > "$TMP/widget.tsx" <<'X'
 /**
+ * 注释里举反例写了 Widget.present(<Button label={<Body/>} />) 也不该被当成真调用。
+ */
+import { Text, Widget } from "scripting"
+function main() {
+  Widget.present(<Text>hi</Text>)
+}
+main()
+X
+if python3 dev/check.py "$TMP" >/dev/null 2>&1; then
+  echo "  ok   注释里的 Widget.present 例子不误报"
+else
+  echo "  FAIL 注释里的 Widget.present 例子被当成真调用"
+  python3 dev/check.py "$TMP" || true
+  fail=1
+fi
+rm -f "$TMP/widget.tsx"
+
+cat > "$TMP/widget.tsx" <<'X'
+/**
  * 文档注释里的占位符不是 JSX：
  *   Authorization: Bearer <CMD_API_KEY>
  *   泛型写法 Array<Foo> 同理

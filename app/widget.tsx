@@ -1,32 +1,42 @@
 /**
  * 桌面 / 锁屏小组件。
  *
- * ## 这个文件全程同步，一个 await 都没有
+ * ## 这个文件的两条硬约束
  *
- * 两次真机事故换来的形状：
+ * 1. **全程同步。** 顶层 `await` 会抛 `ReferenceError`（脚本按普通脚本求值，
+ *    不是 ES 模块）；把 present 包进 async 函数则一片漆黑——`Widget.present`
+ *    必须在同步执行过程中被调用。文件读取走 `readAsStringSync`。
  *
- * 1. 顶层 `await` -> `ReferenceError: Can't find variable: await`。
- *    小组件脚本按普通脚本求值，不是 ES 模块。
- * 2. 把异步动作包进 `async main()` 之后 -> **小组件一片漆黑**。
- *    异步做完再 `Widget.present`，时机上已经太晚。
+ * 2. **导入图要尽量小。** 文档写着小组件约有 30MB 内存上限，超了会
+ *    「渲染失败或显示为空白」。所以这里刻意**不 import**：
+ *      - `providers.ts` / `p_*.ts`（十个服务商的抓取逻辑，画一行图标用不到）
+ *      - `refresh.ts`（网络编排，小组件不联网）
+ *      - `app_intents.tsx`（它会连带拖进上面两个）
+ *    显示用的名字/图标/颜色单独放在 `meta.ts` 里，就是为了这件事。
  *
- * 所以现在：同步读文件（`FileManager.readAsStringSync`），立刻 present。
- * **不要再往这个文件里加 `await`**，`dev/check.py` 会拦。
+ * ## 实测过的失败写法（别再试）
  *
- * 代价是小组件不能自己联网抓数据了——网络请求没有同步版本。刷新改由
- * 点击小组件（AppIntent）和主 App 承担，这也是用户要的交互。
+ *   Widget.present(<Button label={<Body/>} .../>)  -> 一片漆黑（Button 当根视图）
+ *   顶层 await                                      -> ReferenceError
+ *   async main() 里 present                         -> 一片漆黑
  *
- * ## 出错要看得见
+ * ## 点击行为
  *
- * 整个流程包在 try/catch 里，任何异常都会 present 一个带错误文本的视图。
- * 在一个静默失败的平台上，「一片漆黑」是最贵的症状——它不告诉你任何事。
- * 宁可显示一行难看的报错。
+ * 两种，由 `settings.widgetTap` 决定。都不需要 AppIntent：
+ *   `open` —— 不包裹，系统默认（打开脚本）
+ *   `link` —— `<Link url={run_single?action=refresh}>` 包住内容；`index.tsx` 认这个
+ *             参数，抓完直接退出不展示界面。Link 收自定义布局是文档化的。
+ *
+ * ## 排障
+ *
+ * 小组件的 Parameter 填 `min`，只渲染一行纯文本。它还黑就说明问题在加载阶段
+ * （导入或环境），跟这里的视图树无关；能显示就说明视图树里有东西不被 WidgetKit 支持。
+ * 这是这个平台上唯一能二分的办法。
  */
 import {
-  Button,
   HStack,
-  Link,
   Image,
+  Link,
   Script,
   Spacer,
   Text,
@@ -37,7 +47,6 @@ import {
   RoundedRectangle,
   AccessoryWidgetBackground,
 } from "scripting"
-import { RefreshQuotaIntent } from "./app_intents"
 import { loadConfigSync, loadSnapshotSync, probeKeychain, writeWidgetDiagSync } from "./store"
 import { STATUS_COLOR, TRACK_COLOR } from "./theme"
 import type { AccountRow } from "./view"
@@ -57,8 +66,8 @@ let rows: AccountRow[] = []
 let totals = { good: 0, warn: 0, bad: 0, failed: 0 }
 let updatedAt = 0
 let refreshMinutes = 15
-/** 点击行为。整块可点时不画角落那个按钮 —— 按钮套按钮在 WidgetKit 上行为未定义。 */
-let tapMode: "open" | "button" | "link" = "open"
+/** 点击行为。 */
+let tapMode: "open" | "link" = "open"
 
 // ---------- 组件 ----------
 
@@ -123,7 +132,7 @@ function Row({ row, barWidth, dense }: { row: AccountRow; barWidth: number; dens
   )
 }
 
-function Header({ trailing }: { trailing?: boolean }) {
+function Header() {
   return (
     <HStack spacing={4}>
       <Image systemName="gauge.with.dots.needle.33percent" font={10} foregroundStyle="secondaryLabel" />
@@ -140,25 +149,7 @@ function Header({ trailing }: { trailing?: boolean }) {
           {fmtAgo(updatedAt, now)}
         </Text>
       )}
-      {trailing && tapMode === "open" ? <RefreshButton /> : null}
     </HStack>
-  )
-}
-
-/**
- * 角落里的刷新按钮。只在「点击=打开脚本」模式下出现。
- *
- * 用的是文档里小组件 Button 的原样写法（title + systemImage + intent）。
- */
-function RefreshButton() {
-  return (
-    <Button
-      title=""
-      systemImage="arrow.clockwise"
-      intent={RefreshQuotaIntent(undefined)}
-      buttonStyle="plain"
-      tint="secondaryLabel"
-    />
   )
 }
 
@@ -206,13 +197,9 @@ function SmallView() {
 
       <Spacer />
 
-      <HStack spacing={4}>
-        <Text font={9} foregroundStyle="tertiaryLabel" lineLimit={1}>
-          {metric?.resetAt ? fmtReset(metric.resetAt, now) : `${rows.length} 个账户 · ${fmtAgo(updatedAt, now)}`}
-        </Text>
-        <Spacer />
-        {tapMode === "open" ? <RefreshButton /> : null}
-      </HStack>
+      <Text font={9} foregroundStyle="tertiaryLabel" lineLimit={1}>
+        {metric?.resetAt ? fmtReset(metric.resetAt, now) : `${rows.length} 个账户 · ${fmtAgo(updatedAt, now)}`}
+      </Text>
     </VStack>
   )
 }
@@ -221,7 +208,7 @@ function MediumView() {
   if (rows.length === 0) return <Empty compact={false} />
   return (
     <VStack spacing={7} alignment="leading" frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" }}>
-      <Header trailing />
+      <Header />
       {rows.slice(0, 4).map((row) => (
         <Row key={row.account.id} row={row} barWidth={contentWidth} dense />
       ))}
@@ -234,7 +221,7 @@ function LargeView() {
   if (rows.length === 0) return <Empty compact={false} />
   return (
     <VStack spacing={9} alignment="leading" frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" }}>
-      <Header trailing />
+      <Header />
       {rows.slice(0, 7).map((row) => (
         <VStack key={row.account.id} spacing={3} alignment="leading" frame={{ maxWidth: "infinity", alignment: "leading" }}>
           <Row row={row} barWidth={contentWidth} dense={false} />
@@ -316,16 +303,6 @@ function WidgetView() {
 }
 
 // 桌面小组件才画自己的底；锁屏的底交给系统。
-/** 内容本体，不带背景。button 模式下由外层容器画底，免得叠两层。 */
-function Inner() {
-  if (isAccessory) return <WidgetView />
-  return (
-    <VStack padding={14} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-      <WidgetView />
-    </VStack>
-  )
-}
-
 /** 内容 + 背景。open / link 两种模式直接用它。 */
 function Body() {
   if (isAccessory) return <WidgetView />
@@ -357,11 +334,23 @@ function Failed({ message }: { message: string }) {
   )
 }
 
+// Parameter 填 min 时只渲染一行纯文本。
+// 这是这个平台上唯一能二分的办法：还黑 -> 问题在加载阶段（导入/环境）；
+// 能显示 -> 问题在视图树里，有组件不被 WidgetKit 支持。
+if (String(Widget.parameter ?? "").trim().toLowerCase() === "min") {
+  Widget.present(
+    <VStack padding={12}>
+      <Text font={14}>AI 额度</Text>
+      <Text font={10}>最小渲染 OK</Text>
+      <Text font={10}>{rawFamily || "family?"}</Text>
+    </VStack>,
+  )
+} else
 try {
   const config = loadConfigSync()
   const snapshot = loadSnapshotSync()
   refreshMinutes = config.settings.refreshMinutes
-  tapMode = config.settings.widgetTap
+  tapMode = config.settings.widgetTap === "link" ? "link" : "open"
 
   const all = buildRows(config, snapshot, now)
   rows = sortBySeverity(enabledRows(all))
@@ -377,34 +366,16 @@ try {
     keychainReadable: probeKeychain(),
   })
 
-  // 「整块可点」在这个平台上没有确定可用的写法，所以三种实现按设置切。
-  //
-  // 实测记录（别删，省得以后再试一遍）：
-  //   把 Button 当作 present 的**根视图** -> 真机一片漆黑。
-  //   所以 button 模式是「根容器里套一个撑满的 Button」，更接近文档示例的形状。
-  let presented = <Body />
-  if (tapMode === "button") {
-    presented = (
-      <VStack
-        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        widgetBackground={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 20 } }}
-      >
-        <Button
-          intent={RefreshQuotaIntent(undefined)}
-          buttonStyle="plain"
-          label={<Inner />}
-        />
-      </VStack>
-    )
-  } else if (tapMode === "link") {
-    // Link 收自定义布局是文档化的，小组件里也有明确说明（它会让 widgetURL 失效）。
-    // run_single 保证不会开出一堆实例；action=refresh 由 index.tsx 认，抓完就退出。
-    presented = (
+  const presented =
+    tapMode === "link" ? (
+      // Link 收自定义布局是文档化的，小组件里也有明确说明（它会让 widgetURL 失效）。
+      // run_single 保证不会开出一堆实例；action=refresh 由 index.tsx 认，抓完就退出。
       <Link url={Script.createRunSingleURLScheme(Script.name, { action: "refresh" })}>
         <Body />
       </Link>
+    ) : (
+      <Body />
     )
-  }
 
   Widget.present(presented, {
     // 到下一个刷新周期再让系统回来要新时间线。iOS 会自己打折扣，这里只是给个意图。

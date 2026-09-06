@@ -4,8 +4,12 @@
  * 主 App 和小组件共用它，好处是两边永远显示同一套判断——排序、状态色、
  * 「几分钟前」的措辞只有一份实现。小组件里发现的显示问题，在主 App 里改一次
  * 两边都好。
+ *
+ * **只依赖 meta.ts，不碰 providers.ts。** 小组件通过这个文件间接引入的东西，
+ * 全都会被加载进那个只有约 30MB 内存的扩展进程；十个 provider 的抓取逻辑
+ * 它一行都用不到。
  */
-import { providerOrPlaceholder } from "./providers"
+import { metaOf } from "./meta"
 import type { Account, AppConfig, Metric, Snapshot } from "./types"
 import type { DisplayMode, NormalizedMetric, Status } from "./util"
 import { fmtMetricDetail, fmtMetricValue, normalizeMetric, statusOf } from "./util"
@@ -51,7 +55,7 @@ export function buildRows(
 ): AccountRow[] {
   const mode: DisplayMode = config.settings.displayMode === "used" ? "used" : "remaining"
   return config.accounts.map((account) => {
-    const provider = providerOrPlaceholder(account.providerId)
+    const meta = metaOf(account.providerId)
     const state = snapshot.states[account.id]
     const metrics: MetricRow[] = (state?.result?.metrics ?? []).map((metric) => {
       const norm = normalizeMetric(metric)
@@ -67,9 +71,9 @@ export function buildRows(
 
     return {
       account,
-      providerName: provider.name,
-      icon: provider.icon,
-      color: provider.color,
+      providerName: meta.name,
+      icon: meta.icon,
+      color: meta.color,
       ok: state?.ok ?? false,
       error: state?.error,
       fetchedAt: state?.fetchedAt ?? 0,

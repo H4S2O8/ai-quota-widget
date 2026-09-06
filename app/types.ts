@@ -110,21 +110,18 @@ export interface Settings {
    */
   autoRefreshOnOpen: boolean
   /**
-   * 点小组件干什么。三种实现方式，因为「整块可点」在这个平台上没有确定可用的写法。
+   * 点小组件干什么。
    *
-   * `open`（默认）—— 不做任何包裹，点击走系统默认（打开脚本），右上角另给一个
-   *                   刷新按钮。**这是唯一确认能渲染的**。
-   * `button`      —— 根容器内放一个撑满的 Button（AppIntent 后台刷新，不切 App）。
-   *                   注意：把 Button 当作 present 的**根视图**实测会一片漆黑，
-   *                   所以这里是「容器里套 Button」，更接近文档示例的形状。
-   * `link`        —— 用 Link 包住内容（Link 收自定义布局是文档化的），点开
-   *                   scripting://run_single 带 action=refresh，主脚本抓完直接退出。
+   * `open`（默认）—— 不做包裹，走系统默认（打开脚本）。
+   * `link`        —— `<Link>` 包住内容，点开 scripting://run_single 带
+   *                   action=refresh，主脚本抓完直接退出不展示界面。
    *                   代价是会短暂切到 Scripting App。
    *
-   * 默认给 open 不是偷懒：整块可点已经让这个小组件黑过一次，默认必须是确定能
-   * 显示的那个。想要点击刷新就在设置里切，切错了也能切回来。
+   * 用 AppIntent 做「整块可点后台刷新」的那条路已经放弃：把 Button 当作
+   * present 的根视图实测一片漆黑，而 import app_intents 又会把十个 provider
+   * 和整套抓取逻辑拖进只有约 30MB 的小组件进程。两条理由都指向不要它。
    */
-  widgetTap: "open" | "button" | "link"
+  widgetTap: "open" | "link"
   /** 单个账户的请求超时（秒） */
   timeoutSec: number
   /**

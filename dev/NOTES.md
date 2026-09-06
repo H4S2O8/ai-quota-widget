@@ -211,7 +211,51 @@ present，时机上已经太晚，小组件拿不到内容。
 判，会把正确的 `main()` 收尾判成错误。现在按花括号深度判「同一层级」，
 `dev/test_check.sh` 里正反例都有。
 
-## 「整块小组件可点」没有确定可用的写法
+## 小组件一片漆黑：排查手册
+
+真机上反复出现，每次原因都不同。已确认的：
+
+| 写法 | 结果 |
+| --- | --- |
+| 顶层 `await` | `ReferenceError: Can't find variable: await` |
+| `async main()` 里 present | 一片漆黑（present 必须在同步执行中调用） |
+| `Widget.present(<Button label={<Body/>} .../>)` | 一片漆黑（Button 当根视图） |
+
+文档里还有一条**没被重视够**的：小组件约有 30MB 内存上限，
+「超了会渲染失败或显示为空白」。而 `widget.tsx` 曾经通过 `view.ts` 和
+`app_intents.tsx` 把十个 provider 的抓取逻辑、整套 refresh 编排全部拖进了那个进程——
+它一行都用不到。现在拆出 `meta.ts` 只放显示元数据，小组件的传递依赖从
+89KB 降到 48KB，且不含任何 `p_*.ts` / `providers.ts` / `refresh.ts` / `app_intents.tsx`。
+
+**验证依赖图有没有回潮**（加新 import 之后跑一下）：
+
+```sh
+cd app && python3 - <<'EOF'
+import pathlib, re
+seen, stack = set(), ["widget.tsx"]
+while stack:
+    f = stack.pop()
+    if f in seen: continue
+    seen.add(f)
+    src = re.sub(r'/\*.*?\*/', '', pathlib.Path(f).read_text(), flags=re.S)
+    for m in re.findall(r'from "\./([A-Za-z0-9_.-]+)"', src):
+        for c in (m, m+".ts", m+".tsx"):
+            if pathlib.Path(c).exists(): stack.append(c); break
+print(sorted(seen))
+EOF
+```
+
+### 二分的办法
+
+小组件的 **Parameter 填 `min`** —— 只渲染一行纯文本。
+
+- 还黑 -> 问题在**加载阶段**（导入失败、内存、或者小组件根本没跑）。
+  这种情况 `widget-diag.json` 也不会有记录，诊断页会显示「还没有记录」。
+- 能显示 -> 问题在**视图树**里，有组件不被 WidgetKit 支持，逐块删了试。
+
+在一个不给报错的平台上，这是唯一可靠的二分手段。
+
+## 旧记录：「整块小组件可点」没有确定可用的写法
 
 实测记录，别删，省得以后再试一遍：
 

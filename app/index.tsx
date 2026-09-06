@@ -258,23 +258,16 @@ function SettingsPage({
           <Picker
             title="点小组件时"
             value={settings.widgetTap}
-            onChanged={(value: string) =>
-              patch({
-                widgetTap: value === "button" || value === "link" ? value : "open",
-              })
-            }
+            onChanged={(value: string) => patch({ widgetTap: value === "link" ? "link" : "open" })}
             pickerStyle="segmented"
           >
             <Text tag="open">打开脚本</Text>
-            <Text tag="button">刷新·按钮</Text>
-            <Text tag="link">刷新·链接</Text>
+            <Text tag="link">刷新额度</Text>
           </Picker>
           <Text font={11} foregroundStyle="tertiaryLabel">
-            {settings.widgetTap === "button"
-              ? "整块小组件是个按钮，点哪儿都后台刷新，不切 App。这个写法官方没有用例——如果小组件因此一片漆黑，切回「打开脚本」就能恢复显示。"
-              : settings.widgetTap === "link"
-                ? "点小组件会短暂切到 Scripting 抓一遍数据然后自动退出。切 App 是它的代价，好处是用的是文档化的写法。"
-                : "点小组件打开脚本（系统默认行为），右上角另有一个刷新按钮。这是唯一确认能正常显示的模式。"}
+            {settings.widgetTap === "link"
+              ? "点小组件会短暂切到 Scripting，抓完一遍自动退回桌面。切一下 App 是它的代价。"
+              : "点小组件打开这个脚本（系统默认行为）。"}
           </Text>
 
           <Toggle
@@ -383,6 +376,11 @@ function DiagnosticsPage({ snapshot, rows }: { snapshot: Snapshot; rows: Account
               还没有记录。把小组件加到桌面并等它渲染一次，这里就会有数据。
             </Text>
           )}
+          <Text font={11} foregroundStyle="tertiaryLabel">
+            小组件一片漆黑时：长按小组件 → 编辑小组件 → Parameter 填 min。
+            那会只渲染一行纯文本——还黑说明问题在加载阶段（导入或环境），
+            能显示说明视图树里有 WidgetKit 不支持的东西。这是唯一能二分的办法。
+          </Text>
           <Text font={11} foregroundStyle="tertiaryLabel">
             小组件进程里的 console.log 看不到，「它到底跑没跑」只能靠这条记录反推。
             「能读 Keychain」那一行是为了将来把凭据搬进 Keychain 攒证据用的。

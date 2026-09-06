@@ -70,6 +70,15 @@ WIDGET_RISKY = [
 ]
 
 
+def _blank_comments(src: str) -> str:
+    """把注释替换成等长空格。偏移量不变，后续的深度计算才不会错位。"""
+    def repl(m):
+        return re.sub(r'[^\n]', " ", m.group(0))
+    src = re.sub(r'/\*.*?\*/', repl, src, flags=re.S)
+    src = re.sub(r'//[^\n]*', repl, src)
+    return src
+
+
 def check_widget_present(path: pathlib.Path, src: str) -> int:
     """Widget.present() 之后、同一层级里不该再有代码。
 
@@ -86,9 +95,15 @@ def check_widget_present(path: pathlib.Path, src: str) -> int:
     """
     if path.name != "widget.tsx":
         return 0
-    at = src.find("Widget.present(")
+
+    # 注释里写 Widget.present(...) 当例子是很常见的（这个项目的 widget.tsx 顶部
+    # 就有一张「实测过的失败写法」表）。定位前要把注释挖掉，否则规则会去分析一段
+    # 文档文字。用等长空格替换而不是删除，这样后面按偏移量算花括号深度仍然准确。
+    blanked = _blank_comments(src)
+    at = blanked.find("Widget.present(")
     if at < 0:
         return 0
+    src = blanked
 
     # present 调用所在的花括号深度
     depth_at_call = src.count("{", 0, at) - src.count("}", 0, at)

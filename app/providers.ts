@@ -30,6 +30,7 @@ import { moonshotProvider } from "./p_moonshot"
 import { oneapiProvider } from "./p_oneapi"
 import { openrouterProvider } from "./p_openrouter"
 import { siliconflowProvider } from "./p_siliconflow"
+import { metaOf } from "./meta"
 import type { Provider } from "./types"
 
 /** 顺序就是「添加账户」页面里的顺序。 */
@@ -55,9 +56,7 @@ export function providerOrPlaceholder(id: string): Provider {
   return (
     providerById(id) ?? {
       id,
-      name: `未知服务 (${id})`,
-      icon: "questionmark.circle",
-      color: "#8E8E93",
+      ...metaOf(id),
       help: "这个账户所属的服务商在当前版本里不存在。可能是脚本版本回退了。",
       fields: [],
       async fetch() {
