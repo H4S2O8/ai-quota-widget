@@ -62,20 +62,38 @@ export async function requestJson(
   init: { method?: string; headers?: Record<string, string>; body?: string },
   timeoutSec: number,
 ): Promise<JsonResponse> {
-  const response = await fetch(url, {
-    method: init.method ?? "GET",
-    headers: init.headers,
-    body: init.body,
-    timeout: timeoutSec,
-  })
-  const text = await response.text()
-  let json: unknown = undefined
+  // 超时用 AbortController + setTimeout 自己实现，不只依赖 fetch 的 timeout 选项。
+  //
+  // 两个理由：
+  // 1. `timeout` 是 Scripting 给 fetch 加的私有扩展，node 不认。只写它的话，
+  //    dev/ 里的测试永远测不到超时行为——而超时恰恰是最容易出错的一条路径。
+  //    Command Code 的 whoami 把整个抓取拖死那个 bug，就是因为没测到。
+  // 2. AbortController 那条路在官方 fetch 文档里有完整用例，setTimeout 也是
+  //    脚本环境唯一保证可用的定时器。两者都是文档化的写法。
+  //
+  // 两个都传：平台的原生超时先生效也好，没生效也有这条兜底。
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort("timeout"), Math.max(1, timeoutSec) * 1000)
   try {
-    json = text ? JSON.parse(text) : undefined
-  } catch {
-    json = undefined
+    const response = await fetch(url, {
+      method: init.method ?? "GET",
+      headers: init.headers,
+      body: init.body,
+      timeout: timeoutSec,
+      signal: controller.signal,
+    })
+    const text = await response.text()
+    let json: unknown = undefined
+    try {
+      json = text ? JSON.parse(text) : undefined
+    } catch {
+      json = undefined
+    }
+    return { status: response.status, ok: response.ok, json, text }
+  } finally {
+    // 成功也要清，否则定时器一直挂到超时才释放
+    clearTimeout(timer)
   }
-  return { status: response.status, ok: response.ok, json, text }
 }
 
 /** 把 HTTP 失败翻译成一句能看懂的话 */

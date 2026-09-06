@@ -199,6 +199,44 @@ check("额度池没有上限", cc[2].max === undefined)
 eq("缺 cap 的窗口跳过", C.parseCredits({ windowLimits: { fiveHour: { used: 3 } } }).length, 0)
 eq("什么都没有就给空", C.parseCredits({}).length, 0)
 
+console.log("\n== Command Code：whoami 挂了也要能出数 ==")
+// 这条是回归测试。第一版把 whoami 当硬依赖，它一超时整个抓取就死，
+// 报「请求超时」——而真正要的 credits 根本没被发出去。
+const ccServer = createServer((req, res) => {
+  if (req.url.startsWith("/alpha/whoami")) {
+    // 模拟「前置步骤不可用」：直接吊死，不回应
+    return
+  }
+  if (req.url.startsWith("/alpha/billing/credits")) {
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({
+      credits: { monthlyCredits: 20, purchasedCredits: 0, freeCredits: 0, planId: "individual-goat" },
+      windowLimits: { fiveHour: { used: 2, cap: 14, resetAt: t0 + 600000 } },
+    }))
+    return
+  }
+  res.writeHead(404); res.end("{}")
+})
+await new Promise((r) => ccServer.listen(0, "127.0.0.1", r))
+const ccBase = `http://127.0.0.1:${ccServer.address().port}`
+const ccStart = Date.now()
+const ccResult = await C.commandcodeProvider.fetch(
+  { apiKey: "k", baseUrl: ccBase },
+  { timeoutSec: 8, updateConfig: () => {}, captureRaw: () => {} },
+)
+const ccElapsed = Date.now() - ccStart
+check("whoami 吊死也拿到了额度", ccResult.metrics.length === 2)
+eq("套餐名认出来了", ccResult.plan, "GOAT")
+check(`没有等满主超时（实际 ${Math.round(ccElapsed / 1000)}s，whoami 上限 6s）`, ccElapsed < 7500)
+// orgId 已知时根本不该碰 whoami，应该很快
+const ccStart2 = Date.now()
+const ccResult2 = await C.commandcodeProvider.fetch(
+  { apiKey: "k", baseUrl: ccBase, orgId: "org_1" },
+  { timeoutSec: 8, updateConfig: () => {}, captureRaw: () => {} },
+)
+check("填了 orgId 就跳过 whoami", Date.now() - ccStart2 < 1000 && ccResult2.metrics.length === 2)
+ccServer.close()
+
 console.log("\n== 增长式与扣除式统一 ==")
 // 同一屏里，Claude 的「已用 42%」和 DeepSeek 的「余额 ¥12.5」要读出同一个方向
 const grow = { id: "g", label: "5 小时", kind: "percent", value: 42 }

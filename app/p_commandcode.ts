@@ -40,7 +40,7 @@
  * 都照原样交给上层，由 normalizeMetric 统一（见 util.ts）。
  */
 import type { Metric, Provider, ProviderResult } from "./types"
-import { getPath, num, requestJson, toEpochMs } from "./util"
+import { errorMessage, getPath, num, requestJson, toEpochMs } from "./util"
 
 const BASE = "https://api.commandcode.ai"
 
@@ -78,21 +78,43 @@ export const commandcodeProvider: Provider = {
     const base = ((config.baseUrl ?? "").trim() || BASE).replace(/\/+$/, "")
     const headers = { Authorization: `Bearer ${config.apiKey?.trim() ?? ""}` }
 
-    // orgId 是后面两个请求的参数。个人账号可能没有，取不到就不带。
+    // orgId 只是个查询参数，个人账号本来就可能没有。
+    //
+    // 所以 whoami 是**尽力而为**：超时、报错、返回结构不对，全部忽略，直接去打
+    // credits。第一版把它当成硬依赖，结果它一超时整个抓取就死了，报「请求超时」——
+    // 而真正要的那个请求根本没被发出去过。一个可选的前置步骤不该有能力否决主流程。
+    //
+    // 超时也给得比主请求短：它只是来省一个查询参数的，不值得让人等满一整个超时。
     let orgId = (config.orgId ?? "").trim()
     if (!orgId) {
-      const who = await requestJson(`${base}/alpha/whoami`, { headers }, ctx.timeoutSec)
-      if (who.status === 401 || who.status === 403) throw authError(who.status)
-      const found = getPath(who.json, "org.id")
-      if (typeof found === "string" && found) {
-        orgId = found
-        // 下次直接用，省一次请求
-        ctx.updateConfig({ orgId: found })
+      try {
+        const who = await requestJson(
+          `${base}/alpha/whoami`,
+          { headers },
+          Math.min(6, ctx.timeoutSec),
+        )
+        const found = getPath(who.json, "org.id")
+        if (typeof found === "string" && found) {
+          orgId = found
+          // 下次直接用，省这一次请求
+          ctx.updateConfig({ orgId: found })
+        }
+      } catch {
+        // 拿不到就不带 orgId，让 credits 自己去判断凭据对不对
       }
     }
 
     const query = orgId ? `?orgId=${encodeURIComponent(orgId)}` : ""
-    const credits = await requestJson(`${base}/alpha/billing/credits${query}`, { headers }, ctx.timeoutSec)
+    const credits = await requestJson(
+      `${base}/alpha/billing/credits${query}`,
+      { headers },
+      ctx.timeoutSec,
+    ).catch((error: unknown) => {
+      // 超时的措辞要点名是哪一步。「请求超时」四个字帮不了任何人。
+      throw new Error(
+        `读取额度失败：${errorMessage(error)}（请求的是 ${base}/alpha/billing/credits）`,
+      )
+    })
     ctx.captureRaw(credits.text)
     if (credits.status === 401 || credits.status === 403) throw authError(credits.status)
     if (credits.status === 404) {
