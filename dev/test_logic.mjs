@@ -30,6 +30,7 @@ function build(name) {
 const U = await build("util.ts")
 const A = await build("p_anthropic.ts")
 const G = await build("p_generic.ts")
+const M = await build("p_moonshot.ts")
 const V = await build("view.ts")
 const R = await build("refresh.ts")
 
@@ -110,6 +111,17 @@ const headers = G.parseHeaders("Authorization: Bearer abc:def\n# 注释\n\nX-Key
 eq("值里的冒号保留", headers["Authorization"], "Bearer abc:def")
 eq("两边空格吃掉", headers["X-Key"], "v")
 eq("注释与空行忽略", Object.keys(headers).length, 2)
+
+console.log("\n== Moonshot 站点解析 ==")
+eq("空值默认国内站", M.resolveBase(""), "https://api.moonshot.cn")
+eq("未填默认国内站", M.resolveBase(undefined), "https://api.moonshot.cn")
+eq("cn 走国内站", M.resolveBase("cn"), "https://api.moonshot.cn")
+eq("global 走国际站", M.resolveBase("global"), "https://api.moonshot.ai")
+eq("ai 走国际站", M.resolveBase("ai"), "https://api.moonshot.ai")
+eq("大小写与空格", M.resolveBase("  Global "), "https://api.moonshot.ai")
+eq("中文也认", M.resolveBase("国际站"), "https://api.moonshot.ai")
+eq("写全域名就用它", M.resolveBase("https://api.example.com/"), "https://api.example.com")
+eq("认不出来的退回国内站", M.resolveBase("火星"), "https://api.moonshot.cn")
 
 console.log("\n== 视图模型 ==")
 const config = {
