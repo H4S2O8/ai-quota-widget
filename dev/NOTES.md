@@ -211,7 +211,20 @@ present，时机上已经太晚，小组件拿不到内容。
 判，会把正确的 `main()` 收尾判成错误。现在按花括号深度判「同一层级」，
 `dev/test_check.sh` 里正反例都有。
 
-## 小组件点击 = 刷新
+## 小组件点击 = 刷新（整块可点）
+
+`Widget.present` 传的是 `<Button intent={RefreshQuotaIntent(...)} buttonStyle="plain"
+label={<Body/>} />`，整块都是按钮。
+
+`label` / `plain` / `intent` 每一件都是文档化的，但**这个组合没有用例**。所以
+`settings.widgetTap` 留了个开关（`refresh` / `open`）：万一它在某个版本上渲染不
+出来，用户能自己在 App 里切回「打开脚本」模式恢复显示，不用等发新版。
+
+按这个平台的纪律，没有用例的组合本该先当它不支持。这里是用户明确要的交互，
+所以照做，但把「猜错了怎么办」的出口一起给了。切到 `open` 模式时，角落会出现
+一个文档原样写法的刷新按钮——按钮套按钮在 WidgetKit 上行为未定义，两者不同时出现。
+
+## 旧记录：小组件点击 = 刷新
 
 整块小组件包在一个 `Button` 里，`intent` 是 `RefreshQuotaIntent`，
 `buttonStyle="plain"` 免得长出按钮边框。头部原来那个小刷新按钮删了——

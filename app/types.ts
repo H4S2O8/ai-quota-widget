@@ -109,6 +109,17 @@ export interface Settings {
    * 数据的新鲜度改由「打开 App」和「点小组件上的刷新」两条路保证。
    */
   autoRefreshOnOpen: boolean
+  /**
+   * 点小组件干什么。
+   *
+   * `refresh`（默认）—— 整块小组件是一个按钮，点哪儿都是刷新。
+   * `open`     —— 不包按钮，点击走系统默认（打开脚本），右上角另给一个刷新按钮。
+   *
+   * 做成开关不是为了花哨：整块包 Button 用到的是 `label` + `buttonStyle="plain"`，
+   * 每一件都是文档化的，但这个组合没有用例。万一它在某个版本上渲染不出来，
+   * 用户能自己在 App 里切回去，不用等我发新版。
+   */
+  widgetTap: "refresh" | "open"
   /** 单个账户的请求超时（秒） */
   timeoutSec: number
   /**
@@ -147,6 +158,7 @@ export interface Snapshot {
 export const DEFAULT_SETTINGS: Settings = {
   refreshMinutes: 15,
   autoRefreshOnOpen: true,
+  widgetTap: "refresh",
   timeoutSec: 15,
   displayMode: "remaining",
 }

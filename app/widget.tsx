@@ -56,6 +56,8 @@ let rows: AccountRow[] = []
 let totals = { good: 0, warn: 0, bad: 0, failed: 0 }
 let updatedAt = 0
 let refreshMinutes = 15
+/** 整块可点时不再画角落那个按钮 —— 按钮套按钮在 WidgetKit 上行为未定义。 */
+let wholeWidgetTaps = true
 
 // ---------- 组件 ----------
 
@@ -137,18 +139,15 @@ function Header({ trailing }: { trailing?: boolean }) {
           {fmtAgo(updatedAt, now)}
         </Text>
       )}
-      {trailing ? <RefreshButton /> : null}
+      {trailing && !wholeWidgetTaps ? <RefreshButton /> : null}
     </HStack>
   )
 }
 
 /**
- * 刷新按钮。用的是文档里小组件 Button 的原样写法（title + systemImage + intent），
- * 没有自创组合。
+ * 角落里的刷新按钮。只在「点击=打开脚本」模式下出现。
  *
- * 之前试过把整块小组件包进 `<Button label={...}>` 让哪儿都能点——那一版真机上
- * 一片漆黑。原因是异步还是 Button 分不清，所以这一版先回到确定能渲染的形状：
- * 一个看得见的按钮。等这版确认能显示，再考虑要不要整块可点。
+ * 用的是文档里小组件 Button 的原样写法（title + systemImage + intent）。
  */
 function RefreshButton() {
   return (
@@ -211,7 +210,7 @@ function SmallView() {
           {metric?.resetAt ? fmtReset(metric.resetAt, now) : `${rows.length} 个账户 · ${fmtAgo(updatedAt, now)}`}
         </Text>
         <Spacer />
-        <RefreshButton />
+        {wholeWidgetTaps ? null : <RefreshButton />}
       </HStack>
     </VStack>
   )
@@ -350,6 +349,7 @@ try {
   const config = loadConfigSync()
   const snapshot = loadSnapshotSync()
   refreshMinutes = config.settings.refreshMinutes
+  wholeWidgetTaps = config.settings.widgetTap !== "open"
 
   const all = buildRows(config, snapshot, now)
   rows = sortBySeverity(enabledRows(all))
@@ -365,7 +365,19 @@ try {
     keychainReadable: probeKeychain(),
   })
 
-  Widget.present(<Body />, {
+  // 整块小组件就是刷新按钮：点哪儿都触发 RefreshQuotaIntent。
+  // buttonStyle="plain" 是为了不让它长出按钮的边框和底色。
+  //
+  // label / plain / intent 每一件都是文档化的，但这个组合没有用例。所以留了
+  // 设置开关：万一某个版本上渲染不出来，用户能自己切回「点击打开脚本」，
+  // 不用等我发新版。
+  const presented = wholeWidgetTaps ? (
+    <Button intent={RefreshQuotaIntent(undefined)} buttonStyle="plain" label={<Body />} />
+  ) : (
+    <Body />
+  )
+
+  Widget.present(presented, {
     // 到下一个刷新周期再让系统回来要新时间线。iOS 会自己打折扣，这里只是给个意图。
     policy: "after",
     date: new Date(now + refreshMinutes * 60000),

@@ -5,7 +5,7 @@
   },
   "icon": "gauge.with.dots.needle.33percent",
   "color": "#5E5CE6",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "runInApp": true,
   "description": "Home-screen and Lock Screen widget tracking remaining quota across AI providers: Claude subscription usage windows, OpenRouter, DeepSeek, SiliconFlow, Moonshot, OpenAI-compatible relays, or any JSON endpoint. Extensible: one file per provider.",
   "localizedDescriptions": {

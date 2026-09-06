@@ -255,6 +255,21 @@ function SettingsPage({
             这也是「数据算过期」的阈值。iOS 对小组件刷新有自己的配额，设得再短系统也不保证照做。
           </Text>
 
+          <Picker
+            title="点小组件时"
+            value={settings.widgetTap}
+            onChanged={(value: string) => patch({ widgetTap: value === "open" ? "open" : "refresh" })}
+            pickerStyle="segmented"
+          >
+            <Text tag="refresh">刷新额度</Text>
+            <Text tag="open">打开脚本</Text>
+          </Picker>
+          <Text font={11} foregroundStyle="tertiaryLabel">
+            {settings.widgetTap === "open"
+              ? "点小组件打开脚本；小组件右上角另有一个刷新按钮。"
+              : "整块小组件都是刷新按钮，点哪儿都会重新抓一遍。如果小组件因此显示不出来，切到「打开脚本」即可恢复。"}
+          </Text>
+
           <Toggle
             title="打开 App 时自动刷新"
             value={settings.autoRefreshOnOpen}
