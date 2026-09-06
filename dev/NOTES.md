@@ -103,15 +103,22 @@ releases/latest/download/AI-Quota.zip -> 200,  44KB, application/zip
 
 文档对这个字段的说明是「a `.zip` or Git repository」，tree 网页两样都不是。
 
-现在填的是 `releases/latest/download/AI-Quota.zip`，它 302 到最新 release 的同名
-附件，所以**发一个新 release 就等于推一次更新**，不用改 script.json 里的 URL。
+试过两种能用的写法，最后选了后者：
 
-两个后果要知道：
+| 写法 | 问题 |
+| --- | --- |
+| `releases/latest/download/AI-Quota.zip` | 是 302 跳转，而「Scripting 跟不跟随重定向」没有文档也没验证过；实测发布后几分钟内附件 CDN 还会返回上一版 |
+| `raw.githubusercontent.com/.../main/AI-Quota.zip` | 不跳转，`cache-control: max-age=300`，永远跟着 main。**用这个** |
 
-- **只有发了 release 才会更新**，push 到 main 不会。这反而是好事——半成品不会
-  自动跑到手机上。
-- **改这个 URL 本身救不了已经装好的旧版本**。旧版本里存的是旧 URL，它拉不到东西
-  也就更新不了自己。必须手动重装一次，之后才进入自动更新的轨道。
+所以 `AI-Quota.zip` 是**故意提交进仓库的**，它就是那条更新链的内容。改完代码
+跑 `dev/pack.sh` 会同时更新 `.scripting` 和 `.zip`，两个都要提交。
+
+推 main 不会打扰用户：Scripting 是按 `script.json` 的 `version` 判断要不要更新的，
+版本号不变就不会有动静。所以「什么时候真正推送给用户」由你改不改版本号决定，
+和 push 的频率无关。
+
+**改这个 URL 本身救不了已经装好的旧版本**。旧版本里存的是旧 URL，它拉不到东西
+也就更新不了自己。必须手动重装一次，之后才进入自动更新的轨道。
 
 版本号现在显示在主列表的「诊断」那一行和诊断页顶部。装完之后先看一眼那里，
 确认拿到的是不是你以为的版本——不然「更新到没到」只能靠猜。
@@ -120,8 +127,10 @@ releases/latest/download/AI-Quota.zip -> 200,  44KB, application/zip
 
 按重要性排：
 
-1. **remoteResource 换成 release zip 直链之后到底更不更新。** 它是 302 跳转，
-   Scripting 的下载器跟不跟随重定向没有文档说明。不跟随的话就只能手动重装。
+1. **remoteResource 换成 raw zip 直链之后到底更不更新。** 这是目前最大的未知数：
+   之前那版（GitHub tree 网页）是确定不工作的，新的这版没有重定向、返回真 zip、
+   根目录第一项就是 script.json，形状上都对，但只有真机能证明。
+   装上之后看诊断页的版本号。
 2. **小组件能不能读 App Group 目录里的配置。** 整个数据共享都压在这上面。
    看诊断页的「小组件上次渲染 → 读到账户」是不是非 0。
 3. **小组件自刷新会不会被 iOS 掐掉。** 扩展进程有时间和内存限制（约 30MB），

@@ -2,6 +2,3 @@
 *.swp
 .idea/
 .vscode/
-
-# 打包产物的 .zip 副本只作为 Release 附件分发，不进仓库
-AI-Quota.zip
