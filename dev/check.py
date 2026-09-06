@@ -62,6 +62,13 @@ RISKY = [
      "主界面 present 之后 Dialog.* 会静默失败（改用页面内的 TextField / alert 修饰符）"),
 ]
 
+# widget.tsx 专属：这个文件必须全程同步。
+# 两次真机事故：顶层 await 直接 ReferenceError；包进 async main 之后一片漆黑。
+WIDGET_RISKY = [
+    (r'\bawait\b', "widget.tsx 里出现 await（小组件必须同步渲染，见该文件顶部说明）"),
+    (r'\basync\b', "widget.tsx 里出现 async（同上）"),
+]
+
 
 def check_widget_present(path: pathlib.Path, src: str) -> int:
     """Widget.present() 之后、同一层级里不该再有代码。
@@ -167,7 +174,10 @@ def check_file(path: pathlib.Path) -> int:
             print(f'✗ {path.name}: 用了 {name}.* 但没有从 "scripting" 导入 {name}')
 
     # 3) 高危写法
-    for pat, why in RISKY:
+    checks = list(RISKY)
+    if path.name == "widget.tsx":
+        checks += WIDGET_RISKY
+    for pat, why in checks:
         if re.search(pat, code, re.S):
             fail += 1
             print(f"✗ {path.name}: {why}")

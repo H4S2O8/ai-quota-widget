@@ -31,13 +31,23 @@ expect_fail "Widget.present 之后还有代码" widget.tsx
 
 cat > "$TMP/widget.tsx" <<'X'
 import { Text, Widget } from "scripting"
-async function main() {
+function main() {
   Widget.present(<Text>hi</Text>)
   console.log("同一层，这行不会跑")
 }
 main()
 X
 expect_fail "present 之后同层还有代码（在函数里）" widget.tsx
+
+cat > "$TMP/widget.tsx" <<'X'
+import { Text, Widget } from "scripting"
+async function main() {
+  const x = await Promise.resolve(1)
+  Widget.present(<Text>{x}</Text>)
+}
+main()
+X
+expect_fail "widget.tsx 里有 await" widget.tsx
 
 cat > "$TMP/a.tsx" <<'X'
 import { GeometryReader, Text } from "scripting"
@@ -86,15 +96,15 @@ echo
 echo "== 不该误报的写法 =="
 cat > "$TMP/widget.tsx" <<'X'
 import { Text, Widget } from "scripting"
-async function main() {
+function main() {
   Widget.present(<Text>hi</Text>)
 }
 main()
 X
 if python3 dev/check.py "$TMP" >/dev/null 2>&1; then
-  echo "  ok   present 在 async main 里、末尾 main() 不误报"
+  echo "  ok   present 在函数里、末尾 main() 不误报"
 else
-  echo "  FAIL 正确的 async main 写法被误报"
+  echo "  FAIL 正确的 main() 收尾写法被误报"
   python3 dev/check.py "$TMP" || true
   fail=1
 fi

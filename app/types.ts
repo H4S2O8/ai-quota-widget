@@ -101,8 +101,14 @@ export interface Account {
 export interface Settings {
   /** 小组件多久自行刷新一次；也是「数据算过期」的阈值 */
   refreshMinutes: number
-  /** 小组件渲染时发现数据过期，是否自己去抓（关掉则只显示主 App 抓的缓存） */
-  widgetSelfRefresh: boolean
+  /**
+   * 打开 App 时，数据过期就自动抓一遍。
+   *
+   * 这条是补小组件那边丢掉的自动性：小组件现在全程同步（顶层 await 不可用，
+   * 异步再 present 会一片漆黑），而网络请求没有同步版本，所以它不能自己联网了。
+   * 数据的新鲜度改由「打开 App」和「点小组件上的刷新」两条路保证。
+   */
+  autoRefreshOnOpen: boolean
   /** 单个账户的请求超时（秒） */
   timeoutSec: number
   /**
@@ -140,7 +146,7 @@ export interface Snapshot {
 
 export const DEFAULT_SETTINGS: Settings = {
   refreshMinutes: 15,
-  widgetSelfRefresh: true,
+  autoRefreshOnOpen: true,
   timeoutSec: 15,
   displayMode: "remaining",
 }

@@ -1,12 +1,26 @@
 /**
  * 桌面 / 锁屏小组件。
  *
- * 小组件跑在独立扩展进程里，只渲染一次，hooks 不生效。所以这里的顺序是：
- * 先把数据全部准备好（可能包括一次网络抓取），最后一次性 present。
- * `Widget.present` 之后的代码不会执行——诊断要在它之前写。
+ * ## 这个文件全程同步，一个 await 都没有
  *
- * 尺寸策略：小尺寸只回答「最该操心的那个还剩多少」，中尺寸给一屏清单，
- * 大尺寸展开每个账户的全部指标，锁屏两种给一行/一环。
+ * 两次真机事故换来的形状：
+ *
+ * 1. 顶层 `await` -> `ReferenceError: Can't find variable: await`。
+ *    小组件脚本按普通脚本求值，不是 ES 模块。
+ * 2. 把异步动作包进 `async main()` 之后 -> **小组件一片漆黑**。
+ *    异步做完再 `Widget.present`，时机上已经太晚。
+ *
+ * 所以现在：同步读文件（`FileManager.readAsStringSync`），立刻 present。
+ * **不要再往这个文件里加 `await`**，`dev/check.py` 会拦。
+ *
+ * 代价是小组件不能自己联网抓数据了——网络请求没有同步版本。刷新改由
+ * 点击小组件（AppIntent）和主 App 承担，这也是用户要的交互。
+ *
+ * ## 出错要看得见
+ *
+ * 整个流程包在 try/catch 里，任何异常都会 present 一个带错误文本的视图。
+ * 在一个静默失败的平台上，「一片漆黑」是最贵的症状——它不告诉你任何事。
+ * 宁可显示一行难看的报错。
  */
 import {
   Button,
@@ -23,29 +37,13 @@ import {
   AccessoryWidgetBackground,
 } from "scripting"
 import { RefreshQuotaIntent } from "./app_intents"
-import { isStale, refreshAccounts } from "./refresh"
-import { loadConfig, loadSnapshot, probeKeychain, saveSnapshot, writeWidgetDiag } from "./store"
+import { loadConfigSync, loadSnapshotSync, probeKeychain, writeWidgetDiagSync } from "./store"
 import { STATUS_COLOR, TRACK_COLOR } from "./theme"
 import type { AccountRow } from "./view"
 import { buildRows, enabledRows, sortBySeverity, summarize } from "./view"
 import { fmtAgo, fmtReset } from "./util"
 
-// ---------- 状态 ----------
-//
-// 小组件脚本是**当作普通脚本求值的，不是模块**，所以顶层 `await` 会直接抛
-// `ReferenceError: Can't find variable: await`。所有异步动作必须收进一个
-// async 函数里，最后在那个函数内部调 Widget.present。
-//
-// （另一个项目里顶层 await 的写法我照抄了，没验证——这个平台上「别人那样写过」
-// 不等于「能用」。）
-
 const now = Date.now()
-
-/** present 之前填好，组件只读它们。小组件只渲染一次，用不着 state。 */
-let rows: AccountRow[] = []
-let totals = { good: 0, warn: 0, bad: 0, failed: 0 }
-let updatedAt = 0
-let refreshMinutes = 15
 
 // Widget.family 的取值在文档里有两种写法（Quick Start 写 'small'，Widget API 写
 // 'systemSmall'）。两种都认，免得在某个版本上整块判空。
@@ -53,6 +51,11 @@ const rawFamily = String(Widget.family ?? "")
 const family = rawFamily.replace(/^system/, "").toLowerCase()
 const isAccessory = family.startsWith("accessory")
 const contentWidth = Math.max(80, (Widget.displaySize?.width ?? 160) - 28)
+
+let rows: AccountRow[] = []
+let totals = { good: 0, warn: 0, bad: 0, failed: 0 }
+let updatedAt = 0
+let refreshMinutes = 15
 
 // ---------- 组件 ----------
 
@@ -134,12 +137,28 @@ function Header({ trailing }: { trailing?: boolean }) {
           {fmtAgo(updatedAt, now)}
         </Text>
       )}
-      {trailing ? (
-        // 只是个可点提示，不是按钮 —— 整块小组件已经包在一个 Button 里了，
-        // 按钮套按钮在 WidgetKit 上行为未定义。
-        <Image systemName="hand.tap" font={9} foregroundStyle="tertiaryLabel" />
-      ) : null}
+      {trailing ? <RefreshButton /> : null}
     </HStack>
+  )
+}
+
+/**
+ * 刷新按钮。用的是文档里小组件 Button 的原样写法（title + systemImage + intent），
+ * 没有自创组合。
+ *
+ * 之前试过把整块小组件包进 `<Button label={...}>` 让哪儿都能点——那一版真机上
+ * 一片漆黑。原因是异步还是 Button 分不清，所以这一版先回到确定能渲染的形状：
+ * 一个看得见的按钮。等这版确认能显示，再考虑要不要整块可点。
+ */
+function RefreshButton() {
+  return (
+    <Button
+      title=""
+      systemImage="arrow.clockwise"
+      intent={RefreshQuotaIntent(undefined)}
+      buttonStyle="plain"
+      tint="secondaryLabel"
+    />
   )
 }
 
@@ -187,9 +206,13 @@ function SmallView() {
 
       <Spacer />
 
-      <Text font={9} foregroundStyle="tertiaryLabel" lineLimit={1}>
-        {metric?.resetAt ? fmtReset(metric.resetAt, now) : `${rows.length} 个账户 · ${fmtAgo(updatedAt, now)}`}
-      </Text>
+      <HStack spacing={4}>
+        <Text font={9} foregroundStyle="tertiaryLabel" lineLimit={1}>
+          {metric?.resetAt ? fmtReset(metric.resetAt, now) : `${rows.length} 个账户 · ${fmtAgo(updatedAt, now)}`}
+        </Text>
+        <Spacer />
+        <RefreshButton />
+      </HStack>
     </VStack>
   )
 }
@@ -306,29 +329,27 @@ function Body() {
   )
 }
 
-async function main() {
-  const config = await loadConfig()
-  let snapshot = await loadSnapshot()
-  refreshMinutes = config.settings.refreshMinutes
-  let selfRefreshed = false
-  let note: string | undefined
+/** 出了任何岔子都要显示点什么，不能留一块黑的。 */
+function Failed({ message }: { message: string }) {
+  return (
+    <VStack
+      spacing={4}
+      padding={12}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      widgetBackground={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 20 } }}
+    >
+      <Image systemName="exclamationmark.triangle.fill" font={16} foregroundStyle={STATUS_COLOR.bad} />
+      <Text font={10} foregroundStyle="secondaryLabel" multilineTextAlignment="center" lineLimit={4}>
+        {message}
+      </Text>
+    </VStack>
+  )
+}
 
-  if (
-    config.settings.widgetSelfRefresh &&
-    config.accounts.some((a) => a.enabled) &&
-    isStale(snapshot, config.settings.refreshMinutes, now)
-  ) {
-    try {
-      // 小组件里不写配置，只写快照：config 的写入权归主 App，
-      // 避免两个进程互相覆盖。
-      const outcome = await refreshAccounts(config, snapshot)
-      snapshot = outcome.snapshot
-      await saveSnapshot(snapshot)
-      selfRefreshed = true
-    } catch (error) {
-      note = `自刷新失败：${String(error)}`
-    }
-  }
+try {
+  const config = loadConfigSync()
+  const snapshot = loadSnapshotSync()
+  refreshMinutes = config.settings.refreshMinutes
 
   const all = buildRows(config, snapshot, now)
   rows = sortBySeverity(enabledRows(all))
@@ -336,25 +357,19 @@ async function main() {
   updatedAt = snapshot.updatedAt
 
   // 诊断必须写在 present 之前 —— present 之后当前执行上下文立刻销毁。
-  await writeWidgetDiag({
+  writeWidgetDiagSync({
     renderedAt: now,
     family: rawFamily,
     accountsSeen: rows.length,
-    selfRefreshed,
+    selfRefreshed: false,
     keychainReadable: probeKeychain(),
-    note,
   })
 
-  // 整块小组件就是一个刷新按钮：点一下跑 RefreshQuotaIntent，抓完 reloadAll。
-  // buttonStyle="plain" 是为了不让它长出按钮的边框和底色。
-  Widget.present(
-    <Button intent={RefreshQuotaIntent(undefined)} buttonStyle="plain" label={<Body />} />,
-    {
-      // 到下一个刷新周期再让系统回来要新时间线。iOS 会自己打折扣，这里只是给个意图。
-      policy: "after",
-      date: new Date(now + refreshMinutes * 60000),
-    },
-  )
+  Widget.present(<Body />, {
+    // 到下一个刷新周期再让系统回来要新时间线。iOS 会自己打折扣，这里只是给个意图。
+    policy: "after",
+    date: new Date(now + refreshMinutes * 60000),
+  })
+} catch (error) {
+  Widget.present(<Failed message={`小组件出错：${String(error)}`} />)
 }
-
-main()

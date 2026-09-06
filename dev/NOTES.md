@@ -173,7 +173,29 @@ releases/latest/download/AI-Quota.zip -> 200,  44KB, application/zip
 现在它包在 try/catch 里，超时上限也压到 6 秒——它只是来省个参数的，不值得让人
 等满一整个超时。回归测试直接让 whoami 吊死不回应，断言仍然出数。
 
-## 小组件里没有顶层 await
+## 小组件必须全程同步（两次事故）
+
+真机上连着栽了两次：
+
+| 写法 | 症状 |
+| --- | --- |
+| 顶层 `await` | `ReferenceError: Can't find variable: await`（脚本按普通脚本求值，不是 ES 模块） |
+| 包进 `async main()` 再 present | **一片漆黑，什么都没有** |
+
+第二条是关键：`Widget.present` 必须在脚本同步执行的过程中被调用。异步做完再
+present，时机上已经太晚，小组件拿不到内容。
+
+所以 `widget.tsx` 现在一个 `await` 都没有，文件读取走 `FileManager.readAsStringSync`。
+`dev/check.py` 加了一条只针对 `widget.tsx` 的规则：出现 `await` 或 `async` 直接报错。
+
+**代价**：小组件不能自己联网抓数据了——网络请求没有同步版本。刷新时机改成两个：
+打开 App（`autoRefreshOnOpen`，数据过期才抓）和点小组件上的刷新按钮（AppIntent）。
+
+**「一片漆黑」这个症状本身就是要消灭的东西。** 现在整个流程包在 try/catch 里，
+出任何异常都会 present 一个带错误文本的视图。在一个静默失败的平台上，
+一块黑方块不告诉你任何事；一行难看的报错至少能定位。
+
+## 旧记录：小组件里没有顶层 await
 
 真机报错：`ReferenceError: Can't find variable: await`。
 

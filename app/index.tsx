@@ -29,7 +29,7 @@ import {
 } from "scripting"
 import { AccountEditor } from "./editor"
 import { PROVIDERS } from "./providers"
-import { refreshAccounts } from "./refresh"
+import { isStale, refreshAccounts } from "./refresh"
 import {
   EMPTY_CONFIG,
   loadConfig,
@@ -256,13 +256,14 @@ function SettingsPage({
           </Text>
 
           <Toggle
-            title="小组件自行刷新"
-            value={settings.widgetSelfRefresh}
-            onChanged={(value) => patch({ widgetSelfRefresh: value })}
+            title="打开 App 时自动刷新"
+            value={settings.autoRefreshOnOpen}
+            onChanged={(value) => patch({ autoRefreshOnOpen: value })}
             tint={ACCENT}
           />
           <Text font={11} foregroundStyle="tertiaryLabel">
-            关掉之后小组件只显示 App 抓来的缓存，不自己联网。省电，但数字会更旧。
+            数据超过上面那个间隔就在开 App 时抓一遍。小组件本身不联网（它必须同步渲染），
+            所以刷新时机就两个：打开 App，或者点小组件上的刷新按钮。
           </Text>
 
           <Stepper
@@ -417,6 +418,16 @@ function MainView() {
       setReady(true)
       // 主 App 每次启动埋一次 Keychain 探针，供小组件下次渲染时回答。
       seedKeychainProbe()
+
+      // 小组件不能自己联网了（见 widget.tsx 顶部），所以打开 App 就是最主要的
+      // 刷新时机。数据还新鲜就不打扰服务商。
+      if (
+        loadedConfig.settings.autoRefreshOnOpen &&
+        loadedConfig.accounts.some((a) => a.enabled) &&
+        isStale(loadedSnapshot, loadedConfig.settings.refreshMinutes)
+      ) {
+        void refreshWith(loadedConfig, loadedSnapshot)
+      }
     })()
   }, [])
 
@@ -449,12 +460,18 @@ function MainView() {
     commitConfig({ ...config, accounts: config.accounts.filter((a) => a.id !== id) })
   }
 
-  async function refresh(accounts?: Account[]) {
-    if (busy) return
+  /**
+   * 显式传 config / snapshot 的版本。
+   *
+   * 启动时的自动刷新必须用它：那时组件里的 config 还是空的（useEffect 刚把
+   * 读到的值 setState 进去，这一轮渲染的闭包里拿不到），用 refresh() 会拿空配置
+   * 去抓，什么都抓不到。
+   */
+  async function refreshWith(cfg: AppConfig, snap: Snapshot, accounts?: Account[]) {
     setBusy(true)
     setMessage("正在刷新…")
     try {
-      const outcome = await refreshAccounts(config, snapshot, accounts)
+      const outcome = await refreshAccounts(cfg, snap, accounts)
       setSnapshot(outcome.snapshot)
       await saveSnapshot(outcome.snapshot)
 
@@ -462,8 +479,8 @@ function MainView() {
       const patches = Object.keys(outcome.configPatches)
       if (patches.length > 0) {
         commitConfig({
-          ...config,
-          accounts: config.accounts.map((a) =>
+          ...cfg,
+          accounts: cfg.accounts.map((a) =>
             outcome.configPatches[a.id]
               ? { ...a, config: { ...a.config, ...outcome.configPatches[a.id] } }
               : a,
@@ -484,6 +501,11 @@ function MainView() {
     }
   }
 
+  function refresh(accounts?: Account[]) {
+    if (busy) return
+    void refreshWith(config, snapshot, accounts)
+  }
+
   const rows = buildRows(config, snapshot)
   const totals = summarize(rows)
 
@@ -492,7 +514,7 @@ function MainView() {
       <List
         navigationTitle="AI 额度"
         refreshable={async () => {
-          await refresh()
+          refresh()
         }}
         toolbar={{
           // 工具栏里只放 Button —— NavigationLink 放进 toolbar 文档里没有用例，
@@ -501,7 +523,7 @@ function MainView() {
             <Button
               title="刷新"
               systemImage="arrow.clockwise"
-              action={() => void refresh()}
+              action={() => refresh()}
               disabled={busy || config.accounts.length === 0}
             />
           ),
@@ -518,7 +540,7 @@ function MainView() {
             <Button
               title={busy ? "刷新中…" : "全部刷新"}
               systemImage="arrow.clockwise"
-              action={() => void refresh()}
+              action={() => refresh()}
               buttonStyle="borderedProminent"
               controlSize="small"
               tint={ACCENT}
@@ -552,7 +574,7 @@ function MainView() {
                 timeoutSec={config.settings.timeoutSec}
                 onChange={upsertAccount}
                 onDelete={() => deleteAccount(row.account.id)}
-                onRefreshOne={() => void refresh([row.account])}
+                onRefreshOne={() => refresh([row.account])}
               />
             ))}
           </Section>
