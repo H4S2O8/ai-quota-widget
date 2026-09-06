@@ -11,6 +11,10 @@ echo
 echo "== 打包（语法 / 本地 import） =="
 ./dev/test_bundle.sh
 echo
+echo "== 打包自洽（漏打包会让手机上装了起不来）=="
+./dev/pack.sh >/dev/null
+./dev/test_pack.sh
+echo
 echo "== 纯逻辑 =="
 node dev/test_logic.mjs
 echo
