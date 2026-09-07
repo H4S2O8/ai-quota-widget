@@ -44,6 +44,8 @@ export interface AccountRow {
   plan?: string
   note?: string
   raw?: string
+  /** 被服务器限流到什么时候（epoch 毫秒）。在此之前不该发任何请求。 */
+  retryAfter?: number
   /** 排序权重：越紧张越靠前 */
   severity: number
 }
@@ -82,6 +84,7 @@ export function buildRows(
       plan: state?.result?.plan,
       note: state?.result?.note,
       raw: state?.raw,
+      retryAfter: state?.retryAfter,
       severity: severityOf(metrics, state?.error != null, account.enabled),
     }
   })

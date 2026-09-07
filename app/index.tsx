@@ -481,6 +481,22 @@ function MainView() {
       ? config.accounts.map((a) => (a.id === account.id ? account : a))
       : [...config.accounts, account]
     commitConfig({ ...config, accounts })
+
+    // 改了凭据就解除「换 token 退避」——那个退避的前提是凭据坏了，
+    // 而你刚换了新的，前提不成立了。
+    //
+    // **但不动 retryAfter。** 那是服务器明确要求我们停手，换自己的 token
+    // 并不会改变服务器的决定；限流通常是按 IP 记的，跟你填什么无关。
+    // 在限流期继续发请求只会把窗口顶得更长。
+    const state = snapshot.states[account.id]
+    if (state?.refreshBlockedUntil !== undefined) {
+      const next = {
+        ...snapshot,
+        states: { ...snapshot.states, [account.id]: { ...state, refreshBlockedUntil: undefined } },
+      }
+      setSnapshot(next)
+      void saveSnapshot(next)
+    }
   }
 
   function deleteAccount(id: string) {

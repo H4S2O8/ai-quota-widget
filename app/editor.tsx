@@ -35,10 +35,13 @@ import { errorMessage, fmtMetricDetail, fmtMetricValue, newId, statusOf } from "
 export function AccountEditor({
   initial,
   timeoutSec,
+  retryAfter,
   onChange,
 }: {
   initial: Account
   timeoutSec: number
+  /** 被服务器限流到什么时候。在此之前「现在抓取」也不该发请求。 */
+  retryAfter?: number
   onChange: (account: Account) => void
 }) {
   const provider = useMemo(() => providerOrPlaceholder(initial.providerId), [initial.providerId])
@@ -73,6 +76,19 @@ export function AccountEditor({
   }
 
   async function test() {
+    // 限流期间连手动抓取也挡住。
+    //
+    // 这一页原本是绕过编排层直接调 provider.fetch 的，所以不受退避约束——
+    // 但「服务器要求你停手」这件事不该因为按钮是人点的就作废。相反，
+    // 换完凭据最想做的就是立刻验证一次，那正是最容易把限流窗口顶长的时刻。
+    if (retryAfter !== undefined && retryAfter > Date.now()) {
+      const mins = Math.max(1, Math.ceil((retryAfter - Date.now()) / 60000))
+      setStatus(
+        `服务器要求等 ${mins} 分钟后再请求，这期间不发请求。` +
+          `限流通常按 IP 记，换新凭据也不会提前解除——先等它过去。`,
+      )
+      return
+    }
     setBusy(true)
     setStatus("正在请求…")
     setPreview(null)
