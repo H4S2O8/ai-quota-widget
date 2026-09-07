@@ -222,30 +222,35 @@ export function credentialFor(fieldKey: string, found: Record<string, string>): 
   return undefined
 }
 
-/** 读剪贴板。Pasteboard 是现行 API，Clipboard 是废弃的旧名。 */
-export function readClipboard(): string {
+/**
+ * 读剪贴板。
+ *
+ * **`Pasteboard.getString()` 返回的是 Promise，必须 await。** 我第一版当同步值用，
+ * 拿到的是字符串 "[object Promise]"，于是解析必然失败——而且报的是
+ * 「剪贴板里不是能识别的 JSON」，把人往错误的方向指。
+ *
+ * 这类 bug 类型检查本来能拦，但平台的全局对象在 shim 里是 any。所以
+ * `dev/typecheck/scripting.d.ts` 现在给用到的全局都写了真实签名。
+ *
+ * 只用 `Pasteboard`，不做废弃的 `Clipboard` 兜底：文档明说前者是现行 API，
+ * 而后者的名字和 DOM 的内置类型撞车，留着只会让类型检查失真。
+ */
+export async function readClipboard(): Promise<string> {
   try {
-    const pb = (globalThis as any).Pasteboard
-    if (pb?.getString) return String(pb.getString() ?? "")
-    const cb = (globalThis as any).Clipboard
-    if (cb?.getText) return String(cb.getText() ?? "")
+    if (typeof Pasteboard !== "undefined" && Pasteboard?.getString) {
+      return String((await Pasteboard.getString()) ?? "")
+    }
   } catch {
-    // 落到返回空串
+    // 落到返回空串。调用方会提示去开「允许从其他 App 粘贴」。
   }
   return ""
 }
 
-/** 复制到剪贴板。Pasteboard 是现行 API，Clipboard 是废弃的旧名，都试一下。 */
-export function copyToClipboard(text: string): boolean {
+/** 写剪贴板。同样是异步的。 */
+export async function copyToClipboard(text: string): Promise<boolean> {
   try {
-    const pb = (globalThis as any).Pasteboard
-    if (pb?.setString) {
-      pb.setString(text)
-      return true
-    }
-    const cb = (globalThis as any).Clipboard
-    if (cb?.copyText) {
-      cb.copyText(text)
+    if (typeof Pasteboard !== "undefined" && Pasteboard?.setString) {
+      await Pasteboard.setString(text)
       return true
     }
   } catch {

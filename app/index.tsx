@@ -156,11 +156,11 @@ function AccountCard({
             title="复制"
             systemImage="doc.on.doc"
             controlSize="small"
-            action={() =>
-              copyToClipboard(
+            action={() => {
+              void copyToClipboard(
                 [`${row.account.label}（${row.providerName}）`, row.error ?? "", "", row.raw ?? ""].join("\n"),
               )
-            }
+            }}
           />
         </HStack>
       ) : null}
@@ -425,7 +425,9 @@ function DiagnosticsPage({ snapshot, rows }: { snapshot: Snapshot; rows: Account
                     title="复制"
                     systemImage="doc.on.doc"
                     controlSize="small"
-                    action={() => copyToClipboard(row.raw ?? "")}
+                    action={() => {
+                      void copyToClipboard(row.raw ?? "")
+                    }}
                   />
                 }
               />

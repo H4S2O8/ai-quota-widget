@@ -21,7 +21,21 @@ declare namespace JSX {
   }
 }
 
-// 平台提供的全局对象，只求「存在」，不求准确
+/**
+ * 用到的全局对象要写**真实签名**，不能一律 any。
+ *
+ * 真实教训：`Pasteboard.getString()` 返回 Promise，我当同步值用了，拿到的是
+ * 字符串 "[object Promise]"。因为它当时是 any，tsc 一声不吭。
+ * 只有写了签名，「漏了 await」才会被拦住。
+ */
+declare const Pasteboard:
+  | {
+      getString(): Promise<string | null>
+      setString(s: string | null): Promise<void>
+    }
+  | undefined
+
+// 其余全局暂时只求「存在」，用到哪个就把哪个的签名补上
 declare const FileManager: any
 declare const Keychain: any
 declare const Storage: any

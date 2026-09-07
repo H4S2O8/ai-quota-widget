@@ -102,10 +102,13 @@ export function AccountEditor({
    * 这是为「refresh token 被电脑上的 CLI 轮换掉之后要重新同步」准备的。
    * 如果重同步意味着在手机上手打三个长字符串，那这条路实际上就是不可用的。
    */
-  function pasteCredentials() {
-    const text = readClipboard().trim()
+  async function pasteCredentials() {
+    const text = (await readClipboard()).trim()
     if (!text) {
-      setStatus("剪贴板是空的。先在电脑上运行取凭据的脚本。")
+      setStatus(
+        "读不到剪贴板内容。先在电脑上运行取凭据的脚本；" +
+          "如果确认已经复制了，去 iOS 的 设置 → Scripting → 从其他 App 粘贴 → 允许。",
+      )
       return
     }
     const found = extractCredentials(text)
@@ -230,7 +233,7 @@ export function AccountEditor({
                   title="粘贴凭据"
                   systemImage="doc.on.clipboard"
                   controlSize="small"
-                  action={pasteCredentials}
+                  action={() => void pasteCredentials()}
                 />
               }
             />
@@ -308,10 +311,9 @@ export function AccountEditor({
                 systemImage="doc.on.doc"
                 controlSize="small"
                 action={() => {
-                  const ok = copyToClipboard(
+                  void copyToClipboard(
                     [`账户：${account.label}（${provider.name}）`, "", status, "", raw].join("\n"),
-                  )
-                  setCopied(ok ? "已复制状态与原始响应" : "复制失败")
+                  ).then((ok) => setCopied(ok ? "已复制状态与原始响应" : "复制失败"))
                 }}
               />
             }
@@ -371,7 +373,11 @@ export function AccountEditor({
                   title="复制"
                   systemImage="doc.on.doc"
                   controlSize="small"
-                  action={() => setCopied(copyToClipboard(raw) ? "已复制原始响应" : "复制失败")}
+                  action={() => {
+                    void copyToClipboard(raw).then((ok) =>
+                      setCopied(ok ? "已复制原始响应" : "复制失败"),
+                    )
+                  }}
                 />
               }
             />
