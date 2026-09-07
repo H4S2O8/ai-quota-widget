@@ -83,7 +83,7 @@ function primaryText(row: AccountRow): string {
   return row.primary?.primary ?? "—"
 }
 
-function Row({ row, barWidth }: { row: AccountRow; barWidth: number }) {
+function Row({ row, barWidth }: { row: AccountRow; barWidth: number; key?: string }) {
   const color = colorOf(row)
   return (
     <VStack spacing={3} alignment="leading" frame={{ maxWidth: "infinity", alignment: "leading" }}>

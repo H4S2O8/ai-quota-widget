@@ -81,9 +81,11 @@ export async function requestJson(
       method: init.method ?? "GET",
       headers: init.headers,
       body: init.body,
+      // `timeout` 是 Scripting 给 fetch 加的私有扩展，标准 RequestInit 里没有，
+      // 所以这里要断言一下才能过类型检查。真正兜底的是上面的 AbortController。
       timeout: timeoutSec,
       signal: controller.signal,
-    })
+    } as RequestInit & { timeout: number })
     const text = await response.text()
     let json: unknown = undefined
     try {

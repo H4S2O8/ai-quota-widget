@@ -26,7 +26,7 @@ import {
   useState,
 } from "scripting"
 import { providerOrPlaceholder } from "./providers"
-import type { Account, ProviderResult } from "./types"
+import type { Account, Provider, ProviderResult } from "./types"
 import { ACCENT, STATUS_COLOR } from "./theme"
 import { Card, FieldLabel, SectionTitle, Well } from "./ui"
 import { errorMessage, fmtMetricDetail, fmtMetricValue, newId, statusOf } from "./util"
@@ -44,11 +44,17 @@ export function AccountEditor({
   retryAfter?: number
   onChange: (account: Account) => void
 }) {
-  const provider = useMemo(() => providerOrPlaceholder(initial.providerId), [initial.providerId])
+  // 显式标注类型不是多余的：`useMemo` 来自 "scripting"，在类型检查里是 any，
+  // 不标注的话 provider 也变成 any，`provider.fetch(...)` 的参数就完全不受检查。
+  // 「给 FetchContext 加了必填字段却漏改这里」正是这么溜过去的。
+  const provider: Provider = useMemo(
+    () => providerOrPlaceholder(initial.providerId),
+    [initial.providerId],
+  )
 
   // id 为空表示这是「添加账户」页递过来的草稿：现在挂载了，才给它一个 id。
   // 惰性初始化（传函数）是文档里 ProgressView 示例用过的写法。
-  const [account, setAccount] = useState<Account>(() =>
+  const [account, setAccount]: [Account, (v: Account) => void] = useState(() =>
     initial.id ? initial : { ...initial, id: newId() },
   )
   const [warnText, setWarnText] = useState(
@@ -56,7 +62,8 @@ export function AccountEditor({
   )
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState(provider.help)
-  const [preview, setPreview] = useState<ProviderResult | null>(null)
+  const [preview, setPreview]: [ProviderResult | null, (v: ProviderResult | null) => void] =
+    useState(null as ProviderResult | null)
   const [raw, setRaw] = useState("")
 
   /** 一处改，一处存。所有输入都经过它。 */
@@ -76,29 +83,37 @@ export function AccountEditor({
   }
 
   async function test() {
-    // 限流期间连手动抓取也挡住。
-    //
-    // 这一页原本是绕过编排层直接调 provider.fetch 的，所以不受退避约束——
-    // 但「服务器要求你停手」这件事不该因为按钮是人点的就作废。相反，
-    // 换完凭据最想做的就是立刻验证一次，那正是最容易把限流窗口顶长的时刻。
+    // 之前这里在限流期间**直接拒绝**手动抓取。那是矫枉过正：退避的意义是拦住
+    // 自动重试，不是把人锁在自己的工具外面。改成提示，让人自己决定要不要试。
     if (retryAfter !== undefined && retryAfter > Date.now()) {
       const mins = Math.max(1, Math.ceil((retryAfter - Date.now()) / 60000))
       setStatus(
-        `服务器要求等 ${mins} 分钟后再请求，这期间不发请求。` +
-          `限流通常按 IP 记，换新凭据也不会提前解除——先等它过去。`,
+        `注意：服务器上一次要求等约 ${mins} 分钟。现在试大概率还是 429，` +
+          `而且可能把窗口顶得更长。仍然为你发出这一次请求。`,
       )
-      return
     }
     setBusy(true)
     setStatus("正在请求…")
     setPreview(null)
     let captured = ""
+    let rateLimitedFor: number | undefined
     try {
       const result = await provider.fetch(account.config, {
         timeoutSec,
         updateConfig: (next) => patch({ config: { ...account.config, ...next } }),
         captureRaw: (text) => {
           captured = text
+        },
+        // 手动点的这一次**永远允许换 token**。
+        //
+        // 退避是用来拦住「自动重试」的：小组件每次渲染都来一遍才危险。人点一下
+        // 按钮是一次有限的、明确的动作，而且他多半刚换过凭据——正是最该放行的时候。
+        // 之前这里漏传，取到 undefined 当假值，于是每一次手动抓取都报「退避中」，
+        // 填了新 token 也没用。
+        allowTokenRefresh: true,
+        onTokenRefreshFailed: () => {},
+        onRateLimited: (seconds) => {
+          rateLimitedFor = seconds
         },
       })
       setPreview(result)
@@ -109,6 +124,11 @@ export function AccountEditor({
       // 成功也要留原文：字段解析对不对，只有对着原文才看得出来。
       if (captured) {
         setRaw(captured.length > 4000 ? `${captured.slice(0, 4000)}\n…（已截断）` : captured)
+      }
+      if (rateLimitedFor !== undefined) {
+        // 直接拼字符串，不用 setState 的函数式更新 —— 那个写法在这个平台上
+        // 没有用例，而这里完全不需要它。
+        setStatus(`被限流，服务器要求等约 ${Math.ceil(rateLimitedFor / 60)} 分钟再试。`)
       }
       setBusy(false)
     }

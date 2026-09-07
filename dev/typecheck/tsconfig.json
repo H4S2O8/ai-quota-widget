@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowJs": false,
+    "types": [],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "noImplicitAny": false
+  },
+  "include": [
+    "../../app/**/*.ts",
+    "../../app/**/*.tsx",
+    "./scripting.d.ts"
+  ]
+}

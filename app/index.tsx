@@ -53,7 +53,7 @@ import type { AccountRow, MetricRow } from "./view"
 
 // ---------- 账户行 ----------
 
-function MetricLine({ item }: { item: MetricRow }) {
+function MetricLine({ item }: { item: MetricRow; key?: string }) {
   return (
     <VStack spacing={4} alignment="leading" frame={{ maxWidth: "infinity", alignment: "leading" }}>
       <HStack spacing={8}>
@@ -92,6 +92,7 @@ function AccountCard({
 }: {
   row: AccountRow
   timeoutSec: number
+  key?: string
   onChange: (account: Account) => void
   onDelete: () => void
   onRefreshOne: () => void
@@ -338,7 +339,8 @@ function SettingsPage({
 // ---------- 诊断 ----------
 
 function DiagnosticsPage({ snapshot, rows }: { snapshot: Snapshot; rows: AccountRow[] }) {
-  const [diag, setDiag] = useState<WidgetDiag | null>(null)
+  const [diag, setDiag]: [WidgetDiag | null, (v: WidgetDiag | null) => void] =
+    useState(null as WidgetDiag | null)
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
@@ -436,8 +438,8 @@ function KeyValue({ label, value, mono }: { label: string; value: string; mono?:
 // ---------- 主页面 ----------
 
 function MainView() {
-  const [config, setConfig] = useState<AppConfig>(EMPTY_CONFIG)
-  const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT)
+  const [config, setConfig]: [AppConfig, (v: AppConfig) => void] = useState(EMPTY_CONFIG)
+  const [snapshot, setSnapshot]: [Snapshot, (v: Snapshot) => void] = useState(EMPTY_SNAPSHOT)
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
@@ -482,17 +484,22 @@ function MainView() {
       : [...config.accounts, account]
     commitConfig({ ...config, accounts })
 
-    // 改了凭据就解除「换 token 退避」——那个退避的前提是凭据坏了，
-    // 而你刚换了新的，前提不成立了。
+    // 改了凭据就把两种退避都解除。
     //
-    // **但不动 retryAfter。** 那是服务器明确要求我们停手，换自己的 token
-    // 并不会改变服务器的决定；限流通常是按 IP 记的，跟你填什么无关。
-    // 在限流期继续发请求只会把窗口顶得更长。
+    // 「换 token 退避」好理解：它的前提是凭据坏了，你刚换了新的，前提不成立。
+    //
+    // 服务器限流那个（retryAfter）也一并清掉，理由是：它是我们本地记的一个副本，
+    // 真正的限流在服务器那边，清掉它并不会让服务器提前放行——但留着它会挡住
+    // 「换完凭据后的第一次抓取」，而那次抓取恰恰是用户最需要的反馈。
+    // 真被限流的话，下一次 429 会把它重新记上，代价只是一个请求。
     const state = snapshot.states[account.id]
-    if (state?.refreshBlockedUntil !== undefined) {
+    if (state && (state.refreshBlockedUntil !== undefined || state.retryAfter !== undefined)) {
       const next = {
         ...snapshot,
-        states: { ...snapshot.states, [account.id]: { ...state, refreshBlockedUntil: undefined } },
+        states: {
+          ...snapshot.states,
+          [account.id]: { ...state, refreshBlockedUntil: undefined, retryAfter: undefined },
+        },
       }
       setSnapshot(next)
       void saveSnapshot(next)

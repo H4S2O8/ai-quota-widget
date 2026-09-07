@@ -5,28 +5,29 @@
  * 每处用到状态色的地方都同时有数字和文字，颜色只是加速识别，不是唯一信息——
  * 色觉障碍和小组件的着色模式下都还读得出来。
  */
-import type { Color } from "scripting"
+/** 平台没发布类型定义，颜色在运行时就是字符串。 */
+type Color = string
 import type { Status } from "./util"
 
-export const ACCENT = "#5E5CE6" as Color
+export const ACCENT = "#5E5CE6"
 
 /** 深色底上要更亮一点才够对比，所以状态色成对给。 */
 export const STATUS_COLOR: Record<Status, { light: Color; dark: Color }> = {
-  good: { light: "#1B873F" as Color, dark: "#4ADE80" as Color },
-  warn: { light: "#B45309" as Color, dark: "#FBBF24" as Color },
-  bad: { light: "#C0392B" as Color, dark: "#FF6B6B" as Color },
-  neutral: { light: "#4B5563" as Color, dark: "#9CA3AF" as Color },
+  good: { light: "#1B873F", dark: "#4ADE80" },
+  warn: { light: "#B45309", dark: "#FBBF24" },
+  bad: { light: "#C0392B", dark: "#FF6B6B" },
+  neutral: { light: "#4B5563", dark: "#9CA3AF" },
 }
 
 /** 进度条的槽。比状态色淡，不抢主体。 */
 export const TRACK_COLOR = { light: "rgba(60,60,67,0.14)", dark: "rgba(235,235,245,0.18)" }
 
-export const CARD_BG = { light: "#FFFFFF" as Color, dark: "#1C1C1E" as Color }
+export const CARD_BG = { light: "#FFFFFF", dark: "#1C1C1E" }
 export const CARD_STROKE = {
-  light: "rgba(17,17,34,0.08)" as Color,
-  dark: "rgba(255,255,255,0.10)" as Color,
+  light: "rgba(17,17,34,0.08)",
+  dark: "rgba(255,255,255,0.10)",
 }
-export const WELL_BG = { light: "#F2F2F7" as Color, dark: "#131316" as Color }
+export const WELL_BG = { light: "#F2F2F7", dark: "#131316" }
 
 export const RADIUS_CARD = 14
 

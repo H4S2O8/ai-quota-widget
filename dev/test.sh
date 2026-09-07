@@ -8,6 +8,9 @@ echo
 echo "== 检查器自己 =="
 ./dev/test_check.sh
 echo
+echo "== 类型检查（漏传必填字段这类，语法检查看不出来） =="
+./dev/test_types.sh
+echo
 echo "== 打包（语法 / 本地 import） =="
 ./dev/test_bundle.sh
 echo

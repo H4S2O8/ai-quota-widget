@@ -6,7 +6,8 @@
  *   「带 padding 的 stack + background 传形状」。
  * - 容器上的 shadow 不生效，卡片边界靠描边。
  */
-import type { VirtualNode } from "scripting"
+/** 平台没发布类型定义。VirtualNode 是不透明的视图节点，不需要知道它的结构。 */
+type VirtualNode = unknown
 import { GeometryReader, HStack, Image, RoundedRectangle, Spacer, Text, VStack, ZStack } from "scripting"
 import { CARD_BG, CARD_STROKE, RADIUS_CARD, STATUS_COLOR, STATUS_ICON, TRACK_COLOR, WELL_BG } from "./theme"
 import type { Status } from "./util"
@@ -17,6 +18,8 @@ export function Card({
 }: {
   children: (VirtualNode | null | undefined)[] | VirtualNode
   spacing?: number
+  /** JSX 的 key 由框架消费，声明一下才能在 map 里用 */
+  key?: string
 }) {
   return (
     <VStack
