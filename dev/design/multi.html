@@ -1,0 +1,86 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#6b6b76;font-family:-apple-system,"SF Pro Text","Helvetica Neue",sans-serif;padding:26px}
+h2{color:#fff;font:600 15px/1 -apple-system;margin:24px 0 10px}
+h2 span{opacity:.6;font-weight:400;font-size:12.5px;margin-left:8px}
+.row{display:flex;gap:16px;flex-wrap:wrap}
+.lbl{color:#fff;opacity:.55;font:500 11px/1;margin:0 0 6px 2px}
+.pair{display:flex;gap:14px}
+.w{border-radius:22px;overflow:hidden}
+.m{width:364px;height:170px}.l{width:364px;height:382px}
+.pad{padding:13px 16px;height:100%;display:flex;flex-direction:column}
+.head{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:11px;display:flex}
+.dot{width:6px;height:6px;border-radius:3px;flex:none}
+.tick{height:2px;margin-top:2px}
+</style></head><body><div id=root></div><script>
+const C={light:{bg:"#FAFAF8",fg:"#1A1A1C",dim:"#71717A",faint:"#8A8A93",track:"#E4E4E7",line:"#E9E9EC",good:"#15803D",warn:"#A16207",bad:"#BE123C"},
+         dark:{bg:"#0E0E10",fg:"#FAFAF8",dim:"#8A8A94",faint:"#6E6E78",track:"#26262A",line:"#212125",good:"#4ADE80",warn:"#F5C451",bad:"#FF8080"}};
+// 账户 -> 多个窗口
+const ACC=[
+ {n:"Claude",  ms:[{w:"5H",v:"58%",u:.42,s:"good"},{w:"7D",v:"23%",u:.77,s:"warn"},{w:"7D OPUS",v:"9%",u:.91,s:"bad"}]},
+ {n:"Codex",   ms:[{w:"5H",v:"71%",u:.29,s:"good"},{w:"7D",v:"44%",u:.56,s:"good"}]},
+ {n:"DeepSeek",ms:[{w:"余额",v:"¥12.5",u:.75,s:"warn"}]},
+ {n:"Kimi Code",ms:[{w:"5H",v:"940",u:.06,s:"good"},{w:"7D",v:"812",u:.19,s:"good"}]},
+ {n:"OpenRouter",ms:[{w:"余额",v:"$3.10",u:.91,s:"bad"}]},
+];
+function worst(a){const o={bad:3,warn:2,good:1};return a.ms.reduce((x,m)=>o[m.s]>o[x.s]?m:x,a.ms[0])}
+// ---- C1：每个窗口一行，账户名只出现一次 ----
+function C1(c,size){
+ const list=ACC.slice(0,size==="l"?4:2);
+ return `<div class="pad" style="background:${c.bg};color:${c.fg}">
+  <div class="head" style="color:${c.faint}">AI QUOTA<span style="flex:1"></span><span style="letter-spacing:0;text-transform:none">14:32</span></div>
+  ${list.map((a,ai)=>`
+   <div style="${ai?`border-top:1px solid ${c.line};padding-top:7px;`:""}margin-bottom:7px">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <span class="dot" style="background:${c[worst(a).s]}"></span>
+      <span style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:${c.dim}">${a.n}</span></div>
+    ${a.ms.map(m=>`<div style="display:flex;align-items:baseline;gap:8px;padding-left:12px">
+      <span style="font-size:9.5px;letter-spacing:.08em;color:${c.faint};width:56px">${m.w}</span>
+      <span style="flex:1;height:2px;background:${c.track};position:relative;top:-3px"><span style="display:block;height:100%;width:${m.u*100}%;background:${c[m.s]}"></span></span>
+      <span style="font-size:14px;font-weight:300;color:${c.fg};min-width:52px;text-align:right;font-variant-numeric:tabular-nums">${m.v}</span></div>`).join("")}
+   </div>`).join("")}<div style="flex:1"></div></div>`}
+// ---- C2：一行一账户，右侧并列小数值，刻度线分段 ----
+function C2(c,size){
+ const list=ACC.slice(0,size==="l"?5:3);
+ return `<div class="pad" style="background:${c.bg};color:${c.fg}">
+  <div class="head" style="color:${c.faint}">AI QUOTA<span style="flex:1"></span><span style="letter-spacing:0;text-transform:none">14:32</span></div>
+  ${list.map((a,ai)=>`
+   <div style="${ai?`border-top:1px solid ${c.line};`:""}padding:8px 0 0">
+    <div style="display:flex;align-items:baseline;gap:8px">
+      <span class="dot" style="background:${c[worst(a).s]}"></span>
+      <span style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:${c.dim};flex:1">${a.n}</span>
+      ${a.ms.map(m=>`<span style="font-size:9px;letter-spacing:.06em;color:${c.faint}">${m.w}</span>
+        <span style="font-size:15px;font-weight:300;color:${c[m.s]};font-variant-numeric:tabular-nums;margin-right:${a.ms.length>1?"8":"0"}px">${m.v}</span>`).join("")}
+    </div>
+    <div style="display:flex;gap:3px;margin-top:5px">
+      ${a.ms.map(m=>`<span style="flex:1;height:2px;background:${c.track}"><span style="display:block;height:100%;width:${m.u*100}%;background:${c[m.s]}"></span></span>`).join("")}
+    </div></div>`).join("")}<div style="flex:1"></div></div>`}
+// ---- C3：主窗口大数字，其余窗口做小字脚注 ----
+function C3(c,size){
+ const list=ACC.slice(0,size==="l"?5:3);
+ return `<div class="pad" style="background:${c.bg};color:${c.fg}">
+  <div class="head" style="color:${c.faint}">AI QUOTA<span style="flex:1"></span><span style="letter-spacing:0;text-transform:none">14:32</span></div>
+  ${list.map((a,ai)=>{const p=worst(a);const rest=a.ms.filter(m=>m!==p);return `
+   <div style="${ai?`border-top:1px solid ${c.line};`:""}padding:7px 0 0">
+    <div style="display:flex;align-items:baseline;gap:9px">
+      <span class="dot" style="background:${c[p.s]}"></span>
+      <span style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:${c.dim};flex:1">${a.n}<span style="color:${c.faint};margin-left:6px;font-size:9px">${p.w}</span></span>
+      <span style="font-size:19px;font-weight:300;color:${c.fg};font-variant-numeric:tabular-nums">${p.v}</span></div>
+    <div class="tick" style="background:${c.track};margin-top:4px"><div style="height:100%;width:${p.u*100}%;background:${c[p.s]}"></div></div>
+    ${rest.length?`<div style="font-size:9.5px;color:${c.faint};margin-top:4px;letter-spacing:.03em">${rest.map(m=>`${m.w} ${m.v}`).join("　")}</div>`:""}
+   </div>`}).join("")}<div style="flex:1"></div></div>`}
+const F={C1,C2,C3};
+const N={C1:"C-1 · 每窗口一行（账户名分组）",C2:"C-2 · 一行一账户，数值并列、刻度分段",C3:"C-3 · 主窗口大字，其余作脚注"};
+const D={C1:"最直白，每个窗口都有自己的刻度；账户多时占行数",C2:"一屏账户最多；多窗口时数字变小",C3:"突出「最该操心的那个窗口」，其余降级为一行小字"};
+let h="";
+for(const k of ["C1","C2","C3"]){
+ h+=`<h2>${N[k]}<span>${D[k]}</span></h2><div class="row">`;
+ for(const mode of ["light","dark"]){
+  h+=`<div><div class="lbl">${mode==="light"?"日间":"夜间"}</div><div class="pair">`;
+  for(const s of ["m","l"]) h+=`<div class="w ${s}">${F[k](C[mode],s)}</div>`;
+  h+=`</div></div>`;
+ }
+ h+=`</div>`;
+}
+document.getElementById("root").innerHTML=h;
+</script></body></html>
