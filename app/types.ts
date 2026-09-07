@@ -102,26 +102,31 @@ export interface Settings {
   /** 小组件多久自行刷新一次；也是「数据算过期」的阈值 */
   refreshMinutes: number
   /**
+   * 小组件渲染时发现数据过期，是否自己去抓。
+   *
+   * 一度以为小组件不能联网（因为异步会导致渲染失败），后来拿到一份能正常工作的
+   * 样本，它在 async 里 await 完网络请求才 present——所以这条能力一直都在，
+   * 是我归因错了。
+   */
+  widgetSelfRefresh: boolean
+  /**
    * 打开 App 时，数据过期就自动抓一遍。
    *
-   * 这条是补小组件那边丢掉的自动性：小组件现在全程同步（顶层 await 不可用，
-   * 异步再 present 会一片漆黑），而网络请求没有同步版本，所以它不能自己联网了。
-   * 数据的新鲜度改由「打开 App」和「点小组件上的刷新」两条路保证。
+   * 和小组件自刷新是互补的：iOS 给小组件的刷新配额有限且不保证，
+   * 打开 App 是最可靠的那个时机。
    */
   autoRefreshOnOpen: boolean
   /**
    * 点小组件干什么。
    *
-   * `open`（默认）—— 不做包裹，走系统默认（打开脚本）。
-   * `link`        —— `<Link>` 包住内容，点开 scripting://run_single 带
-   *                   action=refresh，主脚本抓完直接退出不展示界面。
-   *                   代价是会短暂切到 Scripting App。
+   * `refresh`（默认）—— 整块小组件包在一个 Button 里，点哪儿都触发 AppIntent
+   *                      在后台抓一遍，不切 App。
+   * `open`          —— 不包裹，走系统默认（打开脚本）。
    *
-   * 用 AppIntent 做「整块可点后台刷新」的那条路已经放弃：把 Button 当作
-   * present 的根视图实测一片漆黑，而 import app_intents 又会把十个 provider
-   * 和整套抓取逻辑拖进只有约 30MB 的小组件进程。两条理由都指向不要它。
+   * 关键细节：Button 的内容必须走 **children**（`<Button ...>{内容}</Button>`），
+   * 不能用 `label={...}` 属性——后者实测一片漆黑。
    */
-  widgetTap: "open" | "link"
+  widgetTap: "refresh" | "open"
   /** 单个账户的请求超时（秒） */
   timeoutSec: number
   /**
@@ -159,8 +164,9 @@ export interface Snapshot {
 
 export const DEFAULT_SETTINGS: Settings = {
   refreshMinutes: 15,
+  widgetSelfRefresh: true,
   autoRefreshOnOpen: true,
-  widgetTap: "open",
+  widgetTap: "refresh",
   timeoutSec: 15,
   displayMode: "remaining",
 }

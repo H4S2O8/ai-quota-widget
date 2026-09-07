@@ -55,24 +55,6 @@ async function ensureDir(): Promise<void> {
   }
 }
 
-/**
- * 同步读。小组件专用。
- *
- * 小组件里顶层 await 不可用，而把 present 放进 async 函数之后又出现了
- * 「一片漆黑」——异步做完再 present，时机上就已经太晚了。所以小组件那条路
- * 全程不碰 Promise：同步读文件，立刻 present。
- */
-function readJsonSync<T>(path: string, fallback: T): T {
-  try {
-    if (!FileManager.existsSync(path)) return fallback
-    const text = FileManager.readAsStringSync(path)
-    if (!text) return fallback
-    return JSON.parse(text) as T
-  } catch {
-    return fallback
-  }
-}
-
 async function readJson<T>(path: string, fallback: T): Promise<T> {
   try {
     if (!FileManager.existsSync(path)) return fallback
@@ -102,11 +84,6 @@ export const EMPTY_CONFIG: AppConfig = {
 export async function loadConfig(): Promise<AppConfig> {
   const raw = await readJson<Partial<AppConfig>>(configPath(), EMPTY_CONFIG)
   return normalizeConfig(raw)
-}
-
-/** 同步版，给小组件用。 */
-export function loadConfigSync(): AppConfig {
-  return normalizeConfig(readJsonSync<Partial<AppConfig>>(configPath(), EMPTY_CONFIG))
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {
@@ -141,8 +118,9 @@ function normalizeSettings(raw: Partial<Settings> | undefined): Settings {
   const timeout = Number(value.timeoutSec)
   return {
     refreshMinutes: Number.isFinite(minutes) ? Math.min(720, Math.max(5, minutes)) : DEFAULT_SETTINGS.refreshMinutes,
+    widgetSelfRefresh: value.widgetSelfRefresh !== false,
     autoRefreshOnOpen: value.autoRefreshOnOpen !== false,
-    widgetTap: value.widgetTap === "link" ? "link" : DEFAULT_SETTINGS.widgetTap,
+    widgetTap: value.widgetTap === "open" ? "open" : DEFAULT_SETTINGS.widgetTap,
     timeoutSec: Number.isFinite(timeout) ? Math.min(60, Math.max(5, timeout)) : DEFAULT_SETTINGS.timeoutSec,
     displayMode: value.displayMode === "used" ? "used" : DEFAULT_SETTINGS.displayMode,
   }
@@ -152,15 +130,6 @@ function normalizeSettings(raw: Partial<Settings> | undefined): Settings {
 
 export async function loadSnapshot(): Promise<Snapshot> {
   const raw = await readJson<Partial<Snapshot>>(snapshotPath(), EMPTY_SNAPSHOT)
-  return {
-    updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : 0,
-    states: raw.states && typeof raw.states === "object" ? raw.states : {},
-  }
-}
-
-/** 同步版，给小组件用。 */
-export function loadSnapshotSync(): Snapshot {
-  const raw = readJsonSync<Partial<Snapshot>>(snapshotPath(), EMPTY_SNAPSHOT)
   return {
     updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : 0,
     states: raw.states && typeof raw.states === "object" ? raw.states : {},
@@ -215,12 +184,9 @@ function diagPath(): string {
   return Path.join(dataDir(), DIAG_FILE)
 }
 
-/** 同步版，给小组件用。写失败绝不能影响出图，所以整段吞掉。 */
-export function writeWidgetDiagSync(diag: WidgetDiag): void {
+export async function writeWidgetDiag(diag: WidgetDiag): Promise<void> {
   try {
-    const dir = dataDir()
-    if (!FileManager.existsSync(dir)) FileManager.createDirectorySync(dir, true)
-    FileManager.writeAsStringSync(diagPath(), JSON.stringify(diag))
+    await writeJson(diagPath(), diag)
   } catch {
     // 诊断写失败不能影响小组件出图
   }

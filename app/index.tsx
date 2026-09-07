@@ -258,16 +258,27 @@ function SettingsPage({
           <Picker
             title="点小组件时"
             value={settings.widgetTap}
-            onChanged={(value: string) => patch({ widgetTap: value === "link" ? "link" : "open" })}
+            onChanged={(value: string) => patch({ widgetTap: value === "open" ? "open" : "refresh" })}
             pickerStyle="segmented"
           >
             <Text tag="open">打开脚本</Text>
-            <Text tag="link">刷新额度</Text>
+            <Text tag="refresh">刷新额度</Text>
           </Picker>
           <Text font={11} foregroundStyle="tertiaryLabel">
-            {settings.widgetTap === "link"
-              ? "点小组件会短暂切到 Scripting，抓完一遍自动退回桌面。切一下 App 是它的代价。"
-              : "点小组件打开这个脚本（系统默认行为）。"}
+            {settings.widgetTap === "open"
+              ? "点小组件打开这个脚本（系统默认行为）。"
+              : "整块小组件都是刷新按钮，点哪儿都会在后台重新抓一遍，不切 App。"}
+          </Text>
+
+          <Toggle
+            title="小组件自行刷新"
+            value={settings.widgetSelfRefresh}
+            onChanged={(value) => patch({ widgetSelfRefresh: value })}
+            tint={ACCENT}
+          />
+          <Text font={11} foregroundStyle="tertiaryLabel">
+            小组件被系统唤起重画时，数据过期就自己联网抓一遍。iOS 对小组件的刷新
+            配额有限且不保证，所以这条只是尽力而为，真正可靠的还是打开 App。
           </Text>
 
           <Toggle

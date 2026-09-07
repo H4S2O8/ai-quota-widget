@@ -40,14 +40,22 @@ X
 expect_fail "present 之后同层还有代码（在函数里）" widget.tsx
 
 cat > "$TMP/widget.tsx" <<'X'
-import { Text, Widget } from "scripting"
-async function main() {
-  const x = await Promise.resolve(1)
-  Widget.present(<Text>{x}</Text>)
+import { Button, Text, Widget } from "scripting"
+function main() {
+  Widget.present(<Button label={<Text>hi</Text>} />)
 }
 main()
 X
-expect_fail "widget.tsx 里有 await" widget.tsx
+expect_fail "widget.tsx 里 Button 用 label= 属性" widget.tsx
+
+cat > "$TMP/widget.tsx" <<'X'
+import { Text, VStack, Widget } from "scripting"
+function main() {
+  Widget.present(<VStack widgetBackground={{ style: "systemBackground" }}><Text>hi</Text></VStack>)
+}
+main()
+X
+expect_fail "widget.tsx 里用 widgetBackground" widget.tsx
 
 cat > "$TMP/a.tsx" <<'X'
 import { GeometryReader, Text } from "scripting"
@@ -103,6 +111,19 @@ main()
 X
 if python3 dev/check.py "$TMP" >/dev/null 2>&1; then
   echo "  ok   present 在函数里、末尾 main() 不误报"
+fi
+rm -f "$TMP/widget.tsx"
+
+cat > "$TMP/widget.tsx" <<'X'
+import { Text, Widget } from "scripting"
+async function main() {
+  const x = await Promise.resolve(1)
+  Widget.present(<Text>{x}</Text>)
+}
+main()
+X
+if python3 dev/check.py "$TMP" >/dev/null 2>&1; then
+  echo "  ok   小组件里的 async/await 不再误报（样本证明它可用）"
 else
   echo "  FAIL 正确的 main() 收尾写法被误报"
   python3 dev/check.py "$TMP" || true

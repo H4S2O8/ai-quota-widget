@@ -62,11 +62,18 @@ RISKY = [
      "主界面 present 之后 Dialog.* 会静默失败（改用页面内的 TextField / alert 修饰符）"),
 ]
 
-# widget.tsx 专属：这个文件必须全程同步。
-# 两次真机事故：顶层 await 直接 ReferenceError；包进 async main 之后一片漆黑。
+# widget.tsx 专属。
+#
+# 这里曾经有一条「禁止 async/await」的规则，是**错的**：它建立在「异步导致小组件
+# 漆黑」这个错误归因上。后来拿到一份能正常工作的小组件样本，它在 async 里
+# await 完网络请求才 present，跑得好好的。规则已撤。
+#
+# 真正踩过的是这两条：
 WIDGET_RISKY = [
-    (r'\bawait\b', "widget.tsx 里出现 await（小组件必须同步渲染，见该文件顶部说明）"),
-    (r'\basync\b', "widget.tsx 里出现 async（同上）"),
+    (r'<Button[^>]*\blabel=',
+     "widget.tsx 里 Button 用 label= 属性（实测一片漆黑，内容要走 children）"),
+    (r'\bwidgetBackground=',
+     "widget.tsx 里用 widgetBackground（能跑的样本用的是 backgroundColor + 扁平 hex）"),
 ]
 
 
