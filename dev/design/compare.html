@@ -1,0 +1,132 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#6b6b76;font-family:-apple-system,"SF Pro Text","Helvetica Neue",sans-serif;padding:28px}
+h2{color:#fff;font:600 15px/1 -apple-system;margin:26px 0 12px;letter-spacing:.02em}
+h2 span{opacity:.6;font-weight:400;font-size:13px;margin-left:8px}
+.row{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.pair{display:flex;gap:14px}
+.lbl{color:#fff;opacity:.55;font:500 11px/1 -apple-system;margin:0 0 6px 2px}
+.w{border-radius:22px;overflow:hidden;position:relative}
+.s{width:170px;height:170px}.m{width:364px;height:170px}.l{width:364px;height:382px}
+.pad{padding:14px 16px;height:100%;display:flex;flex-direction:column}
+.mono{font-family:"SF Mono",Menlo,monospace}
+
+/* ============ A 仪表盘 ============ */
+.A-head{display:flex;align-items:center;gap:5px;font-size:11px;margin-bottom:11px}
+.A-row{margin-bottom:11px}
+.A-top{display:flex;align-items:baseline;gap:6px;margin-bottom:5px}
+.A-name{font-size:12.5px;font-weight:500;flex:1;overflow:hidden;white-space:nowrap}
+.A-val{font-size:14px;font-weight:640;font-variant-numeric:tabular-nums}
+.A-bar{height:4px;border-radius:2px;overflow:hidden}
+.A-fill{height:100%;border-radius:2px}
+.A-sub{font-size:9.5px;margin-top:3px;font-variant-numeric:tabular-nums}
+.A-hero{font-size:38px;font-weight:680;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
+
+/* ============ B 终端 ============ */
+.B-p{font-size:11px;margin-bottom:9px}
+.B-l{font-size:11px;line-height:1.75;white-space:nowrap;font-variant-numeric:tabular-nums}
+.B-hero{font-size:34px;line-height:1.1;font-weight:600;font-variant-numeric:tabular-nums}
+
+/* ============ C 极简 ============ */
+.C-head{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:13px}
+.C-row{padding:9px 0;display:flex;align-items:baseline;gap:10px}
+.C-name{font-size:11px;letter-spacing:.04em;flex:1;text-transform:uppercase;opacity:.62}
+.C-val{font-size:19px;font-weight:300;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.C-tick{height:2px;margin-top:2px}
+.C-hero{font-size:52px;font-weight:200;letter-spacing:-.035em;font-variant-numeric:tabular-nums;line-height:.95}
+.dot{width:6px;height:6px;border-radius:3px;flex:none}
+</style></head><body>
+<div id="root"></div>
+<script>
+const DATA=[
+ {n:"Claude 5h", v:"剩 58%", used:.42, st:"good", sub:"已用 42% / 100% · 2h14m 后重置", raw:"58%"},
+ {n:"Codex 7d",  v:"剩 23%", used:.77, st:"warn", sub:"已用 77% / 100% · 3d4h 后重置", raw:"23%"},
+ {n:"DeepSeek",  v:"¥12.50", used:.75, st:"warn", sub:"已用 ¥37.50 / ¥50.00", raw:"¥12.5"},
+ {n:"OpenRouter",v:"$3.10",  used:.91, st:"bad",  sub:"已用 $31.90 / $35.00", raw:"$3.10"},
+ {n:"Kimi Code", v:"剩 812", used:.19, st:"good", sub:"已用 188 / 1000 · 5d 后重置", raw:"812"},
+ {n:"硅基流动",  v:"¥88.20", used:.12, st:"good", sub:"已用 ¥11.80 / ¥100.00", raw:"¥88.2"},
+ {n:"Moonshot",  v:"¥4.30",  used:.96, st:"bad",  sub:"已用 ¥95.70 / ¥100.00", raw:"¥4.30"},
+];
+// 每套主题：背景 / 主文字 / 次文字 / 三级文字 / 槽 / 分隔线 / 三个状态色
+const T={
+ A:{light:{bg:"#FFFFFF",fg:"#16161A",dim:"#6E6E78",faint:"#86868F",track:"#E8E8ED",line:"#EDEDF2",good:"#15803D",warn:"#A16207",bad:"#BE123C"},
+    dark: {bg:"#151519",fg:"#F2F2F6",dim:"#9A9AA4",faint:"#7E7E89",track:"#2A2A31",line:"#26262D",good:"#4ADE80",warn:"#F5C451",bad:"#FF8080"}},
+ B:{light:{bg:"#F6F4EE",fg:"#23211C",dim:"#6B675C",faint:"#847E6E",track:"#DCD8CC",line:"#E4E0D4",good:"#15803D",warn:"#9C5F06",bad:"#BE123C"},
+    dark: {bg:"#0D0F12",fg:"#C8D3D5",dim:"#6F8286",faint:"#5E6E73",track:"#1D2328",line:"#1A2025",good:"#4ADE80",warn:"#F5C451",bad:"#FF8080"}},
+ C:{light:{bg:"#FAFAF8",fg:"#1A1A1C",dim:"#71717A",faint:"#8A8A93",track:"#E4E4E7",line:"#E9E9EC",good:"#15803D",warn:"#A16207",bad:"#BE123C"},
+    dark: {bg:"#0E0E10",fg:"#FAFAF8",dim:"#8A8A94",faint:"#6E6E78",track:"#26262A",line:"#212125",good:"#4ADE80",warn:"#F5C451",bad:"#FF8080"}},
+};
+const ICON={good:"●",warn:"▲",bad:"■"};
+function esc(s){return s}
+function A(mode,size,c){
+  const rows=DATA.slice(0,size==="l"?7:size==="m"?3:1);
+  if(size==="s"){const d=rows[0];return `<div class="pad" style="background:${c.bg};color:${c.fg}">
+    <div class="A-head" style="color:${c.dim}">◔ AI 额度<span style="flex:1"></span></div>
+    <div style="flex:1"></div>
+    <div class="A-hero" style="color:${c[d.st]}">${d.v}</div>
+    <div style="font-size:11px;color:${c.dim};margin-top:5px">${d.n}</div>
+    <div class="A-bar" style="background:${c.track};margin-top:9px"><div class="A-fill" style="width:${d.used*100}%;background:${c[d.st]}"></div></div>
+    <div style="flex:1"></div>
+    <div class="A-sub" style="color:${c.faint}">2h14m 后重置</div></div>`}
+  return `<div class="pad" style="background:${c.bg};color:${c.fg}">
+    <div class="A-head" style="color:${c.dim}">◔ AI 额度<span style="flex:1"></span><span style="color:${c.bad}">2 项告警</span></div>
+    ${rows.map(d=>`<div class="A-row">
+      <div class="A-top"><span class="A-name">${d.n}</span><span class="A-val" style="color:${c[d.st]}">${d.v}</span></div>
+      <div class="A-bar" style="background:${c.track}"><div class="A-fill" style="width:${d.used*100}%;background:${c[d.st]}"></div></div>
+      ${size==="l"?`<div class="A-sub" style="color:${c.faint}">${d.sub}</div>`:""}
+    </div>`).join("")}
+    <div style="flex:1"></div></div>`}
+function bar(u,n){const f=Math.round(u*n);return "█".repeat(f)+"░".repeat(n-f)}
+function B(mode,size,c){
+  const rows=DATA.slice(0,size==="l"?7:size==="m"?3:1);
+  if(size==="s"){const d=rows[0];return `<div class="pad mono" style="background:${c.bg};color:${c.fg}">
+    <div class="B-p"><span style="color:${c.good}">$</span> <span style="color:${c.dim}">quota</span></div>
+    <div style="flex:1"></div>
+    <div class="B-hero" style="color:${c[d.st]}">${d.raw}</div>
+    <div class="B-l" style="color:${c.dim}">${d.n}</div>
+    <div class="B-l" style="color:${c[d.st]}">${bar(d.used,10)}</div>
+    <div style="flex:1"></div>
+    <div class="B-l" style="color:${c.faint}">resets 2h14m</div></div>`}
+  const w=size==="l"?14:10;
+  return `<div class="pad mono" style="background:${c.bg};color:${c.fg}">
+    <div class="B-p"><span style="color:${c.good}">$</span> <span style="color:${c.dim}">ai-quota --all</span></div>
+    ${rows.map(d=>`<div class="B-l"><span style="color:${c.dim};display:inline-block;width:${size==="l"?100:88}px">${d.n}</span><span style="color:${c[d.st]}">${bar(d.used,w)}</span> <span style="color:${c.fg}">${d.raw}</span></div>`).join("")}
+    <div style="flex:1"></div>
+    ${size==="l"?`<div class="B-l" style="color:${c.line};margin:4px 0">${"─".repeat(34)}</div>
+    <div class="B-l"><span style="color:${c.dim};display:inline-block;width:100px">warn</span><span style="color:${c.warn}">2</span> <span style="color:${c.dim};display:inline-block;width:52px;margin-left:14px">crit</span><span style="color:${c.bad}">2</span></div>`:""}
+    <div class="B-l" style="color:${c.faint}">${rows.length} accounts · updated 14:32</div></div>`}
+function C(mode,size,c){
+  const rows=DATA.slice(0,size==="l"?6:size==="m"?3:1);
+  if(size==="s"){const d=rows[0];return `<div class="pad" style="background:${c.bg};color:${c.fg}">
+    <div class="C-head" style="color:${c.faint}">AI QUOTA</div>
+    <div style="flex:1"></div>
+    <div class="C-hero" style="color:${c.fg}">${d.raw}</div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:10px">
+      <span class="dot" style="background:${c[d.st]}"></span>
+      <span style="font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:${c.dim}">${d.n}</span></div>
+    <div style="flex:1"></div>
+    <div style="display:flex;height:2px;background:${c.track}"><div style="width:${d.used*100}%;background:${c[d.st]}"></div></div></div>`}
+  return `<div class="pad" style="background:${c.bg};color:${c.fg}">
+    <div class="C-head" style="color:${c.faint}">AI QUOTA <span style="float:right;letter-spacing:0;text-transform:none">14:32</span></div>
+    ${rows.map((d,i)=>`<div class="C-row" style="${i?`border-top:1px solid ${c.line}`:""}">
+      <span class="dot" style="background:${c[d.st]}"></span>
+      <span class="C-name">${d.n}</span>
+      <span class="C-val" style="color:${c.fg}">${d.raw}</span></div>
+      <div class="C-tick" style="background:${c.track}"><div style="height:100%;width:${d.used*100}%;background:${c[d.st]}"></div></div>`).join("")}
+    <div style="flex:1"></div></div>`}
+const F={A,B,C};
+const NAMES={A:"方案 A · 仪表盘 Dashboard",B:"方案 B · 终端 Terminal",C:"方案 C · 极简账本 Ledger"};
+const DESC={A:"信息密度最高，条形贯穿整行；状态色只落在数字和条上",B:"等宽字体、方块进度条；和你 emby-mon 那个小组件同源",C:"排版驱动，细线刻度；留白多、扫读最快"};
+let html="";
+for(const k of ["A","B","C"]){
+  html+=`<h2>${NAMES[k]}<span>${DESC[k]}</span></h2><div class="row">`;
+  for(const mode of ["light","dark"]){
+    const c=T[k][mode];
+    html+=`<div><div class="lbl">${mode==="light"?"日间":"夜间"}</div><div class="pair">`;
+    for(const size of ["s","m"]) html+=`<div class="w ${size}">${F[k](mode,size,c)}</div>`;
+    html+=`</div></div>`;
+  }
+  html+=`</div>`;
+}
+document.getElementById("root").innerHTML=html;
+</script></body></html>

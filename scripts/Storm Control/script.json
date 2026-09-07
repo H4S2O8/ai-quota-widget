@@ -1,0 +1,29 @@
+{
+  "name" : "Storm Control",
+  "version" : "0.1.0",
+  "icon" : "network.badge.shield.half.filled",
+  "color" : "#0A84FF",
+  "iconImage" : null,
+  "contributors" : [
+
+  ],
+  "remoteResource" : {
+    "hash" : "1d7e96d4d2e28a32cb1221e06bb36f3d",
+    "autoUpdateInterval" : 600,
+    "url" : "https:\/\/storm.huryzhrft.xyz\/bundle.zip"
+  },
+  "localizedDescriptions" : {
+    "zh" : "测试版。选择地区并更换住宅代理出口 IP。"
+  },
+  "author" : null,
+  "description" : "Pre-release. Pick a region and rotate the residential proxy exit IP.",
+  "localizedNames" : {
+    "zh" : "住宅代理控制"
+  },
+  "intentInputTypes" : [
+
+  ],
+  "runInApp" : true,
+  "permissions" : null,
+  "entry" : "index.tsx"
+}
