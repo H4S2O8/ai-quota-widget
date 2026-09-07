@@ -40,14 +40,14 @@
 
 | 服务商 | 拿什么 | 需要填 |
 | --- | --- | --- |
-| Claude 订阅 | 5 小时 / 7 天 / Sonnet / Opus 窗口的已用比例 | access token + refresh token |
+| Claude 订阅 | 5 小时 / 7 天 / Sonnet / Opus 窗口的已用比例 | refresh token |
 | OpenRouter | 账户余额，以及这把 key 自己的限额 | API Key |
 | DeepSeek | 余额（CNY / USD 分开列） | API Key |
 | 硅基流动 | 总余额，赠送与充值分开显示 | API Key |
 | Moonshot / Kimi | 开放平台可用余额、现金、代金券 | 开放平台 API Key + 站点 |
 | Kimi Code | 订阅的 5 小时 / 7 天额度窗口 | Kimi Code 控制台的 `sk-kimi-` Key |
 | Command Code | 订阅的 5 小时 / 7 天窗口 + 额度池 | Command Code 的 API Key |
-| Codex / ChatGPT | 订阅的 5 小时 / 7 天用量窗口 | `~/.codex/auth.json` 里的 token |
+| Codex / ChatGPT | 订阅的 5 小时 / 7 天用量窗口 | account_id + refresh token |
 | OpenAI 兼容中转站 | 剩余额度与已消费 | 站点地址 + 系统访问令牌 |
 | 自定义 JSON 接口 | 你指定的任意字段 | URL、请求头、JSON 路径 |
 

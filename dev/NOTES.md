@@ -260,6 +260,19 @@ Codex 那边报的是「刷新被拒 (200)」——状态码 200 配「被拒」
 现在换 token 失败会把响应体（截断 300 字）带出来。写错误信息时的判据很简单：
 **拿着这句话，能不能决定下一步做什么？** 不能就是没写完。
 
+## 只该问用户要长期凭据
+
+Claude 和 Codex 一开始都把 **access token 设成必填**，refresh token 设成可选。
+方向正好反了：access token 是几小时就死的那个，refresh token 才是长期有效的，
+而且**有了 refresh token 就能换出 access token，反过来不行**。
+
+现在两个 provider 都是「refresh token 必填、access token 可留空」，留空时直接去换，
+不再先发一个注定 401 的请求。Codex 还需要 `account_id`，因为它是请求头、
+不在 token 里、换不出来。
+
+一般化的判据：**问用户要凭据时，先问「这个能不能从别的推出来」和「它多久失效」。**
+能推出来的不要问，短命的不要当主凭据。
+
 ## OAuth access token 都是短命的，必须做刷新
 
 Claude 和 Codex 两个 provider 用的都是 OAuth **access token**，寿命只有几个小时。

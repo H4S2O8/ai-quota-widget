@@ -49,23 +49,23 @@ print(f"refresh_token = {mask(refresh)}")
 print()
 
 # account_id 不敏感，直接给出来；两个 token 分别复制
-payload = access
+# 主角是 refresh_token：access_token 会被自动换出来。
+payload = refresh or access
 try:
     subprocess.run(["pbcopy"], input=payload.encode(), check=True)
-    print("access_token 已复制到剪贴板。")
+    print(f"{'refresh_token' if refresh else 'access_token'} 已复制到剪贴板。")
 except Exception:
     print("没有 pbcopy，自己从 auth.json 里复制。")
 
 print()
-print("手机上：AI 额度 → 添加账户 → Codex / ChatGPT，依次填")
-print(f"  account_id    直接输入上面那串：{account}")
-print( "  access_token  长按粘贴（已在剪贴板）")
-if refresh:
-    print( "  refresh_token 再跑一次本脚本加 --refresh 取它")
+print("手机上：AI 额度 → 添加账户 → Codex / ChatGPT")
+print(f"  account_id     直接输入：{account}")
+print( "  refresh_token  长按粘贴（已在剪贴板）")
+print( "  access_token   留空即可，App 会用 refresh_token 换出来")
+if not refresh:
     print()
-    print("取 refresh_token：./dev/get_codex_token.sh --refresh")
-else:
-    print( "  refresh_token auth.json 里没有，留空即可（过期后手动再取一次）")
+    print("auth.json 里没有 refresh_token —— 那就只能填 access_token，几小时后要重取。")
+    print("在电脑上重新跑一次 codex login 通常会带上它。")
 PY
 
 # --refresh：单独把 refresh_token 放进剪贴板

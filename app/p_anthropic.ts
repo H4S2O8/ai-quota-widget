@@ -69,36 +69,57 @@ export const anthropicProvider: Provider = {
   icon: "sparkle",
   color: "#D97757",
   help:
-    "需要 Claude Code 的 OAuth token（sk-ant-oat...），不是 API Key。" +
-    "跑 dev/get_claude_token.sh 一次取全。**access token 只有几个小时的寿命**，" +
-    "所以 refresh token 也要填——填了就能自动续，不用每次过期都重取一遍。",
+    "只填 refresh token 就够了——access token 会用它换出来。" +
+    "跑 dev/get_claude_token.sh --refresh 取它。凭据来自 Claude Code，不是 API Key。",
   fields: [
-    {
-      key: "token",
-      label: "Access Token",
-      secret: true,
-      required: true,
-      placeholder: "sk-ant-oat01-...",
-      help: "凭据文件里的 accessToken。它是短命的，见下。",
-    },
     {
       key: "refreshToken",
       label: "Refresh Token",
       secret: true,
+      required: true,
       help:
-        "凭据文件里的 refreshToken。填了之后 access token 过期会自动换新的。" +
-        "不填的话每隔几小时就要手动重取一次——这不是这里做得不好，" +
-        "OAuth 的 access token 本来就是设计成短命的。",
+        "凭据文件里的 refreshToken。这是长期有效的那个，填它就行。" +
+        "取法：./dev/get_claude_token.sh --refresh",
+    },
+    {
+      key: "token",
+      label: "Access Token（可留空）",
+      secret: true,
+      placeholder: "sk-ant-oat01-...",
+      help:
+        "留空即可——它只有几个小时寿命，会用上面那个自动换出来并存回这里。" +
+        "只有在你没有 refresh token、只能临时用一下的时候才需要手填。",
     },
   ],
   async fetch(config, ctx): Promise<ProviderResult> {
     let token = config.token?.trim() ?? ""
+    const refreshToken = config.refreshToken?.trim() ?? ""
+
+    if (!token && !refreshToken) {
+      throw new Error("至少要填 refresh token。access token 会用它换出来。")
+    }
+
+    // 没有 access token 就直接去换，不发那个注定 401 的请求。
+    // 省一次往返是次要的，主要是不给用量端点白白增加一次失败调用。
+    if (!token) {
+      if (!ctx.allowTokenRefresh) {
+        throw new Error("上一次换 token 失败，正在退避中（半小时内不再重试）。")
+      }
+      try {
+        const first = await refreshTokens(refreshToken, ctx.timeoutSec)
+        token = first.accessToken
+        ctx.updateConfig({ token: first.accessToken, refreshToken: first.refreshToken })
+      } catch (error) {
+        ctx.onTokenRefreshFailed()
+        throw error
+      }
+    }
+
     let resp = await getUsage(token, ctx.timeoutSec)
 
     // access token 是短命的（几小时），过期就换一个再来一次。
     // 只重试一次：第二次还 401 就是 refresh token 也失效了，得重新登录。
     if (resp.status === 401) {
-      const refreshToken = config.refreshToken?.trim() ?? ""
       if (!refreshToken) {
         throw new Error(
           "access token 已过期 (401)。它本来就只有几个小时的寿命——" +

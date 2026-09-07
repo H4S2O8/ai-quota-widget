@@ -48,29 +48,31 @@ export const codexProvider: Provider = {
   icon: "chevron.left.slash.chevron.right",
   color: "#10A37F",
   help:
-    "读 ChatGPT 订阅的 5 小时 / 7 天用量窗口。凭据在 Codex CLI 登录后写的 " +
-    "~/.codex/auth.json 里，跑 dev/get_codex_token.sh 一次取全。" +
-    "access_token 会过期，把 refresh_token 也填上就能自动续。",
+    "读 ChatGPT 订阅的 5 小时 / 7 天用量窗口。填 account_id 和 refresh_token 两个就够了，" +
+    "access_token 会自动换出来。凭据在 codex login 之后写的 ~/.codex/auth.json 里，" +
+    "跑 dev/get_codex_token.sh 取。",
   fields: [
-    {
-      key: "accessToken",
-      label: "access_token",
-      secret: true,
-      required: true,
-      placeholder: "eyJ...",
-      help: "auth.json 里 tokens.access_token。",
-    },
     {
       key: "accountId",
       label: "account_id",
       required: true,
-      help: "auth.json 里 tokens.account_id，会作为 ChatGPT-Account-Id 头发出去。",
+      help:
+        "auth.json 里 tokens.account_id，作为 ChatGPT-Account-Id 请求头发出去。" +
+        "它不在 token 里，换不出来，所以必须填。",
     },
     {
       key: "refreshToken",
       label: "refresh_token",
       secret: true,
-      help: "可选但强烈建议填。填了之后 access_token 过期能自动换新的，不用再手动取一次。",
+      required: true,
+      help: "auth.json 里 tokens.refresh_token。这是长期有效的那个。",
+    },
+    {
+      key: "accessToken",
+      label: "access_token（可留空）",
+      secret: true,
+      placeholder: "eyJ...",
+      help: "留空即可——会用 refresh_token 自动换出来并存回这里。",
     },
   ],
   async fetch(config, ctx): Promise<ProviderResult> {
@@ -78,11 +80,31 @@ export const codexProvider: Provider = {
     if (!accountId) throw new Error("没填 account_id")
 
     let token = (config.accessToken ?? "").trim()
+    const refreshToken = (config.refreshToken ?? "").trim()
+
+    if (!token && !refreshToken) {
+      throw new Error("至少要填 refresh_token。access_token 会用它换出来。")
+    }
+
+    // 没有 access_token 就直接去换，不发那个注定 401 的请求。
+    if (!token) {
+      if (!ctx.allowTokenRefresh) {
+        throw new Error("上一次换 token 失败，正在退避中（半小时内不再重试）。")
+      }
+      try {
+        const first = await refreshAccessToken(refreshToken, ctx.timeoutSec)
+        token = first.accessToken
+        ctx.updateConfig({ accessToken: first.accessToken, refreshToken: first.refreshToken })
+      } catch (error) {
+        ctx.onTokenRefreshFailed()
+        throw error
+      }
+    }
+
     let resp = await getUsage(token, accountId, ctx.timeoutSec)
 
     // 过期就换一个再来一次。只重试一次——第二次还 401 就是真的要重新登录了。
     if (resp.status === 401) {
-      const refreshToken = (config.refreshToken ?? "").trim()
       if (!refreshToken) {
         throw new Error(
           "access_token 无效或已过期 (401)。填上 refresh_token 可以自动续；" +

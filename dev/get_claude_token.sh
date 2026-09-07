@@ -75,7 +75,7 @@ if [ -z "$TOKEN" ]; then
   exit 1
 fi
 
-printf %s "$TOKEN" | pbcopy 2>/dev/null && COPIED="已复制到剪贴板" || COPIED="（没有 pbcopy，自己复制）"
+printf %s "${REFRESH:-$TOKEN}" | pbcopy 2>/dev/null && COPIED="已把 ${REFRESH:+refresh }token 复制到剪贴板" || COPIED="（没有 pbcopy，自己复制）"
 
 mask() {
   printf "%s…%s（共 %s 字符）" "$(printf %s "$1" | cut -c1-12)" "$(printf %s "$1" | rev | cut -c1-4 | rev)" "$(printf %s "$1" | wc -c | tr -d ' ')"
@@ -91,13 +91,11 @@ fi
 echo "$COPIED"
 echo
 echo "iPhone 上：AI 额度 → 添加账户 → Claude 订阅"
-echo "  Access Token   长按粘贴（已在剪贴板）"
+echo "  只填 Refresh Token 就够了，Access Token 那格可以留空 ——"
+echo "  它只有几个小时寿命，App 会用 refresh token 自动换出来。"
 if [ -n "$REFRESH" ]; then
-  echo "  Refresh Token  再跑一次：./dev/get_claude_token.sh --refresh"
   echo
-  echo "**两个都要填。** access token 只有几个小时寿命，这是 OAuth 的设计，"
-  echo "不是哪里做得不好；Claude Code 在电脑上是靠 refresh token 悄悄续的。"
-  echo "手机上填了 refresh token 才能同样自动续，否则每隔几小时就要回来一趟。"
+  echo "取 refresh token（这才是要填的那个）：./dev/get_claude_token.sh --refresh"
 fi
 
 # --refresh：单独把 refresh token 放进剪贴板
