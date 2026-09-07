@@ -39,34 +39,77 @@ export const STATUS_ICON: Record<Status, string> = {
   neutral: "circle.dashed",
 }
 
-// ---------- 小组件专用调色板（全部扁平 hex） ----------
+// ---------- 小组件调色板：终端风，日夜两套扁平色 ----------
 //
-// 小组件里**不用** `{light, dark}` 动态色，也不用 "secondaryLabel" 这类语义色，
-// 更不用 `widgetBackground` 的 shape 对象形式。
+// **不用 `{light, dark}` 动态色，也不用 "secondaryLabel" 这类语义色。**
+// 两者在小组件里都没验证过，而且曾经和「一片漆黑」搅在一起分不清是谁的锅。
+// 改成渲染时读一次 `Device.colorScheme`，从下面两套里选一套——背景自己画，
+// 前景对比度就完全可控，不依赖任何环境推断。
 //
-// 理由是一份实测样本：另一个能正常渲染的 Scripting 小组件，通篇用的是扁平 hex
-// 加 `backgroundColor`，没有任何动态色和语义色。我这边用满了动态色和
-// widgetBackground，结果一片漆黑。在拿不到报错的情况下，照抄一个已知能跑的形状
-// 比继续猜有价值得多。
+// 配色是查过 WCAG 文字对比度的：三个状态色在各自表面上都 ≥ 4.5:1，
+// 三级文字（时间戳那种）≥ 3.3:1。
 //
-// 代价是小组件不跟随系统深浅色——它固定是一张深色卡片。这是刻意的：
-// 背景由我们自己画，前景色就能确定对比度，不依赖任何环境推断。
-export const W = {
-  bg: "#14141A",
-  fg: "#F2F2F7",
-  dim: "#8E8E93",
-  faint: "#5A5A63",
-  track: "#2C2C34",
-  good: "#4ADE80",
-  warn: "#FBBF24",
-  bad: "#FF6B6B",
-  neutral: "#9CA3AF",
-} as const
+// 一开始用 dataviz 的分类调色板校验器跑，它报 FAIL（警告色和危险色在色觉障碍下
+// ΔE 只有 2.8）。但那个校验器自己写着「仅限分类调色板；单独的状态/文字色应当查
+// WCAG 文字对比度」——状态色不是分类色，它另有二重编码（数字本身、条的长度）。
+// 硬凑一组能过分类校验的颜色，反而会牺牲「红=危险、黄=警告」这个更重要的约定。
+export interface WidgetPalette {
+  bg: string
+  fg: string
+  dim: string
+  faint: string
+  rule: string
+  accent: string
+  good: string
+  warn: string
+  bad: string
+  neutral: string
+}
 
-/** 状态 -> 扁平色。和 STATUS_COLOR 一一对应，只是没有动态色。 */
-export const W_STATUS: Record<Status, string> = {
-  good: W.good,
-  warn: W.warn,
-  bad: W.bad,
-  neutral: W.neutral,
+/** 日间：米白纸感，不用纯白——纯白在阳光下反而更晃。 */
+export const W_LIGHT: WidgetPalette = {
+  bg: "#F6F4EE",
+  fg: "#23211C",
+  dim: "#6B675C",
+  faint: "#847E6E",
+  rule: "#D5D0C2",
+  accent: "#15803D",
+  good: "#15803D",
+  warn: "#9C5F06",
+  bad: "#BE123C",
+  neutral: "#6B675C",
+}
+
+/** 夜间：近黑带一点冷调，像终端。 */
+export const W_DARK: WidgetPalette = {
+  bg: "#0D0F12",
+  fg: "#C8D3D5",
+  dim: "#6F8286",
+  faint: "#5E6E73",
+  rule: "#232A30",
+  accent: "#4ADE80",
+  good: "#4ADE80",
+  warn: "#F5C451",
+  bad: "#FF8080",
+  neutral: "#6F8286",
+}
+
+/**
+ * 按系统外观取一套。
+ *
+ * `Device.colorScheme` 在 TS 版 Device API 里是文档化的，返回 "light" / "dark"。
+ * 取不到就走夜间——小组件多数时间在深色底上，猜错的代价更小。
+ */
+export function widgetPalette(): WidgetPalette {
+  try {
+    if (typeof Device !== "undefined" && Device?.colorScheme === "light") return W_LIGHT
+  } catch {
+    // 落到夜间
+  }
+  return W_DARK
+}
+
+/** 状态 -> 颜色。 */
+export function statusColor(p: WidgetPalette, s: Status): string {
+  return s === "good" ? p.good : s === "warn" ? p.warn : s === "bad" ? p.bad : p.neutral
 }

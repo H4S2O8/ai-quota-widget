@@ -1,0 +1,107 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#6b6b76;font-family:-apple-system,sans-serif;padding:26px}
+h2{color:#fff;font:600 15px/1;margin:22px 0 10px}
+h2 span{opacity:.6;font-weight:400;font-size:12.5px;margin-left:8px}
+.row{display:flex;gap:16px;flex-wrap:wrap}.pair{display:flex;gap:14px}
+.lbl{color:#fff;opacity:.55;font:500 11px/1;margin:0 0 6px 2px}
+.w{border-radius:22px;overflow:hidden}
+.s{width:170px;height:170px}.m{width:364px;height:170px}.l{width:364px;height:382px}
+.pad{padding:13px 15px;height:100%;display:flex;flex-direction:column;
+     font-family:"SF Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+.l1{font-size:11px;line-height:1.62;white-space:pre}
+.l2{font-size:10px;line-height:1.66;white-space:pre}
+</style></head><body><div id=root></div><script>
+const T={light:{bg:"#F6F4EE",fg:"#23211C",dim:"#6B675C",faint:"#847E6E",track:"#D5D0C2",
+                good:"#15803D",warn:"#9C5F06",bad:"#BE123C",accent:"#15803D"},
+         dark:{bg:"#0D0F12",fg:"#C8D3D5",dim:"#6F8286",faint:"#5E6E73",track:"#232A30",
+                good:"#4ADE80",warn:"#F5C451",bad:"#FF8080",accent:"#4ADE80"}};
+const ACC=[
+ {n:"claude",   ms:[{w:"5h",v:"58%",u:.42,s:"good"},{w:"7d",v:"23%",u:.77,s:"warn"},{w:"opus",v:"9%",u:.91,s:"bad"}]},
+ {n:"codex",    ms:[{w:"5h",v:"71%",u:.29,s:"good"},{w:"7d",v:"44%",u:.56,s:"good"}]},
+ {n:"deepseek", ms:[{w:"bal",v:"¥12.5",u:.75,s:"warn"}]},
+ {n:"kimicode", ms:[{w:"5h",v:"940",u:.06,s:"good"},{w:"7d",v:"812",u:.19,s:"good"}]},
+ {n:"openrouter",ms:[{w:"bal",v:"$3.10",u:.91,s:"bad"}]},
+];
+const ord={bad:3,warn:2,good:1};
+const worst=a=>a.ms.reduce((x,m)=>ord[m.s]>ord[x.s]?m:x,a.ms[0]);
+const pad=(s,n)=>s+" ".repeat(Math.max(0,n-[...s].length));
+const lpad=(s,n)=>" ".repeat(Math.max(0,n-[...s].length))+s;
+function bar(u,n){const f=Math.max(u>0?1:0,Math.round(u*n));return "█".repeat(f)+"░".repeat(n-f)}
+// 把一行拆成「文字段 + 颜色」，好让条和数值各自上色
+function line(c,cls,segs){return `<div class="${cls}">${segs.map(([t,col])=>`<span style="color:${col}">${t}</span>`).join("")}</div>`}
+function prompt(c,cmd,cls){return line(c,cls,[["$ ",c.accent],[cmd,c.dim]])}
+
+// —— 变体 1：缩进续行（账户名只出现一次）——
+function V1(c,size){
+ const list=ACC.slice(0,size==="l"?5:size==="m"?2:1);
+ const bw=size==="l"?10:8, nw=9, ww=5;
+ if(size==="s"){const a=list[0],m=worst(a);return `<div class="pad" style="background:${c.bg}">
+   ${prompt(c,"quota","l1")}<div style="flex:1"></div>
+   <div style="font-size:30px;line-height:1.05;color:${c[m.s]};font-weight:600">${m.v}</div>
+   ${line(c,"l1",[[a.n+" "+m.w,c.dim]])}
+   ${line(c,"l1",[[bar(m.u,10),c[m.s]]])}
+   <div style="flex:1"></div>${line(c,"l2",[["resets 2h14m",c.faint]])}</div>`}
+ return `<div class="pad" style="background:${c.bg}">
+  ${prompt(c,"ai-quota --all","l1")}
+  ${list.map(a=>a.ms.map((m,i)=>line(c,"l1",[
+     [pad(i?"":a.n,nw), i?c.faint:c.fg],
+     [pad(m.w,ww), c.dim],
+     [bar(m.u,bw), c[m.s]],
+     [lpad(m.v,7), c.fg],
+  ])).join("")).join("")}
+  <div style="flex:1"></div>
+  ${line(c,"l2",[[`${list.length} accounts · updated 14:32`,c.faint]])}</div>`}
+
+// —— 变体 2：树形（用 ├ └ 连线）——
+function V2(c,size){
+ const list=ACC.slice(0,size==="l"?5:size==="m"?2:1);
+ const bw=size==="l"?9:7;
+ if(size==="s")return V1(c,size);
+ return `<div class="pad" style="background:${c.bg}">
+  ${prompt(c,"ai-quota --tree","l1")}
+  ${list.map(a=>{
+    const head=line(c,"l1",[[pad(a.n,12),c.fg],[a.ms.length>1?"":"",c.dim],[lpad(a.ms.length>1?a.ms.length+" windows":"",0),c.faint]]);
+    const kids=a.ms.map((m,i)=>line(c,"l1",[
+      [(i===a.ms.length-1?" └ ":" ├ "),c.track],
+      [pad(m.w,5),c.dim],
+      [bar(m.u,bw),c[m.s]],
+      [lpad(m.v,7),c.fg],
+    ])).join("");
+    return head+kids;
+  }).join("")}
+  <div style="flex:1"></div>
+  ${line(c,"l2",[[`${list.length} accounts · updated 14:32`,c.faint]])}</div>`}
+
+// —— 变体 3：主窗口一行，其余折成一行摘要 ——
+function V3(c,size){
+ const list=ACC.slice(0,size==="l"?7:size==="m"?4:1);
+ const bw=size==="l"?9:8;
+ if(size==="s")return V1(c,size);
+ return `<div class="pad" style="background:${c.bg}">
+  ${prompt(c,"ai-quota","l1")}
+  ${list.map(a=>{const m=worst(a);const rest=a.ms.filter(x=>x!==m);
+    return line(c,"l1",[
+      [pad(a.n,11),c.fg],[pad(m.w,5),c.dim],[bar(m.u,bw),c[m.s]],[lpad(m.v,7),c.fg]])
+    + (rest.length?line(c,"l2",[[" ".repeat(11)+rest.map(r=>`${r.w} ${r.v}`).join("  "),c.faint]]):"");
+  }).join("")}
+  <div style="flex:1"></div>
+  ${line(c,"l2",[[`${list.length} accounts · updated 14:32`,c.faint]])}</div>`}
+
+const F={V1,V2,V3};
+const N={V1:"B-1 · 缩进续行",V2:"B-2 · 树形连线",V3:"B-3 · 主窗口一行 + 摘要"};
+const D={V1:"账户名只出现一次，续行留空——和 df / ls -l 的对齐惯用法一致",
+         V2:"用 ├ └ 画出从属关系，层级最明确；每行短一点",
+         V3:"每账户固定一行，次要窗口折成一行小字；一屏账户最多"};
+let h="";
+for(const k of ["V1","V2","V3"]){
+ h+=`<h2>${N[k]}<span>${D[k]}</span></h2><div class="row">`;
+ for(const mode of ["light","dark"]){
+  h+=`<div><div class="lbl">${mode==="light"?"日间":"夜间"}</div><div class="pair">`;
+  for(const s of ["s","m","l"]) h+=`<div class="w ${s}">${F[k](T[mode],s)}</div>`;
+  h+=`</div></div>`;
+ }
+ h+=`</div>`;
+}
+document.getElementById("root").innerHTML=h;
+</script></body></html>

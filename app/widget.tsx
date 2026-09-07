@@ -1,42 +1,35 @@
 /**
- * 桌面 / 锁屏小组件。
+ * 桌面 / 锁屏小组件 —— 终端风（设计方案 B-2「树形连线」）。
  *
- * ## 这个文件是照着一份「已知能跑」的样本重建的
+ * 排版语言来自命令行：一行提示符、等宽对齐的列、`├ └` 画出的从属关系、
+ * 方块进度条、底部一行状态。选它是因为 Claude 这类账户有多个额度窗口
+ * （5h / 7d / 7d Opus），而终端本来就有表达层级的惯用法。
  *
- * 之前连着三版一片漆黑，我在没有报错的情况下反复猜，每次都猜错。转机是拿到了
- * 另一个能正常渲染的 Scripting 小组件源码，逐条比对出差异。**它推翻了我三个结论：**
+ * ## 两条硬约束（都是真机换来的）
  *
- *   - 异步是可以的：它在 `async run()` 里 `await` 完网络请求才 present。
- *     所以小组件能自己联网，「异步导致漆黑」是我的错误归因。
- *   - 整块包 Button 是可以的：`<Button intent={...}>{内容}</Button>`。
- *     注意是 **children**，不是我之前用的 `label={...}` 属性。
- *   - 小组件能做网络请求（它跑的是 SSH 采集）。
+ * 1. **`Widget.present` 必须是同步执行链上的最后一步。**
+ *    顶层 `await` 会抛 ReferenceError；把 present 包进 async 函数里再 present
+ *    则一片漆黑。但**异步本身是可以的**——在 async 函数里 await 完再 present
+ *    是可行的（有能跑的样本为证），关键是 present 之后不能再有同层代码。
+ * 2. **Button 的内容走 children，不是 `label=` 属性。** 用 label 那一版一片漆黑。
  *
- * 剩下的差异就是嫌疑人，这里全部对齐到它那一侧：
+ * ## 深浅色
  *
- * | 维度 | 样本（能跑） | 我之前（漆黑） |
- * | --- | --- | --- |
- * | Button 子节点 | children | `label={...}` 属性 |
- * | 背景 | `backgroundColor={hex}` | `widgetBackground={{style, shape}}` |
- * | 颜色 | 扁平 hex | `{light, dark}` 动态色 |
- * | 语义色 | 不用 | `"secondaryLabel"` 等 14 处 |
+ * 读一次 `Device.colorScheme`，从两套扁平 hex 里选一套（见 theme.ts）。
+ * 不用 `{light, dark}` 动态色，也不用语义色——两者在小组件里都没验证过。
  *
- * 所以这里：扁平 hex、自己画背景、Button 用 children。代价是小组件不跟随系统
- * 深浅色，固定是一张深色卡片——背景由我们自己画，前景对比度就完全可控。
+ * ## 对齐
  *
- * 改这个文件之前请先看这段。在一个不给报错的平台上，**照抄一个已知能跑的形状**
- * 比读文档更可靠：文档说得对不对，只有真机知道。
+ * 等宽排版的命门是列宽。中文账户名是双宽字符，用 `String.length` 补空格会整体
+ * 错位，而错位在等宽里特别刺眼。所有补齐都走 `term.ts` 的 `padEnd/padStart`。
  */
 import {
   Button,
   HStack,
-  Image,
-  RoundedRectangle,
   Spacer,
   Text,
   VStack,
   Widget,
-  ZStack,
 } from "scripting"
 import { RefreshQuotaIntent } from "./app_intents"
 import { isStale, refreshAccounts } from "./refresh"
@@ -48,240 +41,255 @@ import {
   saveSnapshot,
   writeWidgetDiag,
 } from "./store"
-import { W, W_STATUS } from "./theme"
-import type { AccountRow } from "./view"
+import { blockBar, padEnd, padStart } from "./term"
+import type { WidgetPalette } from "./theme"
+import { statusColor, widgetPalette } from "./theme"
+import type { AccountRow, MetricRow } from "./view"
 import { buildRows, enabledRows, sortBySeverity, summarize } from "./view"
-import { fmtAgo, fmtReset } from "./util"
+import { fmtClock, fmtReset } from "./util"
 
 const now = Date.now()
+const P = widgetPalette()
 const family = String(Widget.family ?? "")
 const isAccessory = family.startsWith("accessory")
 const isSmall = family === "systemSmall" || family === "small"
 const isLarge = family === "systemLarge" || family === "large"
-const contentWidth = Math.max(80, (Widget.displaySize?.width ?? 160) - 28)
 
-// ---------- 组件 ----------
+/** 每种尺寸的列宽预算。等宽字体下这些数字直接决定了会不会换行。 */
+const LAYOUT = isLarge
+  ? { font: 11, name: 11, win: 5, bar: 9, val: 7, rows: 13 }
+  : { font: 11, name: 10, win: 4, bar: 7, val: 6, rows: 5 }
 
-/** 进度条。宽度由调用方算好传进来——小组件里没有布局回调，靠 displaySize 推。 */
-function Bar({ used, color, width }: { used: number; color: string; width: number }) {
-  const filled = Math.max(3, Math.min(width, width * used))
+// ---------- 一行由若干带色片段拼成 ----------
+
+interface Seg {
+  t: string
+  c: string
+}
+
+/**
+ * 一行等宽文本。
+ *
+ * 用 `styledText` 的分段形式，而不是把几个 `<Text>` 塞进 HStack——
+ * HStack 会在片段之间加自己的间距，等宽对齐当场就毁了。
+ */
+function Line({ segs, size }: { segs: Seg[]; size?: number; key?: string }) {
   return (
-    <ZStack alignment="leading">
-      <RoundedRectangle cornerRadius={3} fill={W.track} frame={{ width, height: 6 }} />
-      <RoundedRectangle cornerRadius={3} fill={color} frame={{ width: filled, height: 6 }} />
-    </ZStack>
+    <Text
+      styledText={{
+        fontDesign: "monospaced",
+        font: size ?? LAYOUT.font,
+        content: segs.map((s) => ({ content: s.t, foregroundColor: s.c })),
+      }}
+      lineLimit={1}
+    />
   )
 }
 
-function colorOf(row: AccountRow): string {
-  if (!row.ok && row.error) return W.bad
-  return W_STATUS[row.primary?.status ?? "neutral"]
+function prompt(text: string): Seg[] {
+  return [
+    { t: "$ ", c: P.accent },
+    { t: text, c: P.dim },
+  ]
 }
 
-function primaryText(row: AccountRow): string {
-  if (!row.ok && row.error) return "失败"
-  return row.primary?.primary ?? "—"
+/** 「├ 5h ███░░░░  58%」这样一行。 */
+function metricSegs(m: MetricRow, last: boolean, indent: boolean): Seg[] {
+  const color = statusColor(P, m.status)
+  return [
+    { t: indent ? (last ? " └ " : " ├ ") : "", c: P.rule },
+    { t: padEnd(m.metric.label, LAYOUT.win), c: P.dim },
+    { t: " ", c: P.dim },
+    { t: blockBar(m.used ?? 0, LAYOUT.bar), c: color },
+    { t: padStart(m.primary, LAYOUT.val + 1), c: P.fg },
+  ]
 }
 
-function Row({ row, barWidth }: { row: AccountRow; barWidth: number; key?: string }) {
-  const color = colorOf(row)
-  return (
-    <VStack spacing={3} alignment="leading" frame={{ maxWidth: "infinity", alignment: "leading" }}>
-      <HStack spacing={5}>
-        <Image systemName={row.icon} font={11} foregroundStyle={color} />
-        <Text font={12} lineLimit={1} foregroundStyle={W.fg}>
-          {row.account.label}
-        </Text>
-        <Spacer />
-        <Text font={12} fontWeight="semibold" foregroundStyle={color}>
-          {primaryText(row)}
-        </Text>
-      </HStack>
-      {row.primary?.used !== undefined ? (
-        <Bar used={row.primary.used} color={color} width={barWidth} />
-      ) : (
-        <Text font={9} foregroundStyle={W.faint} lineLimit={1}>
-          {!row.ok && row.error ? row.error : (row.primary?.detail || row.providerName)}
-        </Text>
-      )}
-    </VStack>
-  )
+function accountLines(row: AccountRow, budget: number): Seg[][] {
+  const out: Seg[][] = []
+  if (!row.ok && row.error) {
+    out.push([
+      { t: padEnd(row.account.label, LAYOUT.name + 2), c: P.fg },
+      { t: "failed", c: P.bad },
+    ])
+    return out
+  }
+  const metrics = row.metrics.slice(0, budget)
+  if (metrics.length === 0) {
+    out.push([
+      { t: padEnd(row.account.label, LAYOUT.name + 2), c: P.fg },
+      { t: "no data", c: P.faint },
+    ])
+    return out
+  }
+  // 只有一个指标时不画树线，省一行；多个时账户名单独成行
+  if (metrics.length === 1) {
+    out.push([
+      { t: padEnd(row.account.label, LAYOUT.name), c: P.fg },
+      { t: " ", c: P.fg },
+      ...metricSegs(metrics[0], true, false),
+    ])
+    return out
+  }
+  out.push([
+    { t: padEnd(row.account.label, LAYOUT.name), c: P.fg },
+    { t: `  ${metrics.length} windows`, c: P.faint },
+  ])
+  for (let i = 0; i < metrics.length; i++) {
+    out.push(metricSegs(metrics[i], i === metrics.length - 1, true))
+  }
+  return out
 }
 
-function Header({ totals, updatedAt }: { totals: Totals; updatedAt: number }) {
-  const alarming = totals.bad + totals.failed
-  return (
-    <HStack spacing={4}>
-      <Image systemName="gauge.with.dots.needle.33percent" font={10} foregroundStyle={W.dim} />
-      <Text font={10} foregroundStyle={W.dim}>
-        AI 额度
-      </Text>
-      <Spacer />
-      <Text font={10} foregroundStyle={alarming > 0 ? W.bad : W.faint}>
-        {alarming > 0 ? `${alarming} 项告警` : fmtAgo(updatedAt, now)}
-      </Text>
-    </HStack>
-  )
+// ---------- 各尺寸 ----------
+
+interface ViewProps {
+  rows: AccountRow[]
+  totals: { good: number; warn: number; bad: number; failed: number }
+  updatedAt: number
 }
 
 function Empty() {
   return (
     <VStack spacing={4} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-      <Image systemName="plus.circle" font={20} foregroundStyle={W.dim} />
-      <Text font={11} foregroundStyle={W.dim} multilineTextAlignment="center">
-        打开 App 添加账户
-      </Text>
+      <Line segs={prompt("ai-quota")} />
+      <Line segs={[{ t: "no accounts configured", c: P.faint }]} />
+      <Line segs={[{ t: "open app to add one", c: P.faint }]} />
     </VStack>
   )
 }
 
-interface Totals {
-  good: number
-  warn: number
-  bad: number
-  failed: number
-}
-
-function SmallView({ rows, totals, updatedAt }: ViewProps) {
+/** 小尺寸：只回答「最该操心的那个还剩多少」。 */
+function SmallView({ rows }: ViewProps) {
   const row = rows[0]
   if (!row) return <Empty />
-  const color = colorOf(row)
-  const metric = row.primary?.metric
+  const m = row.primary
+  const color = m ? statusColor(P, m.status) : P.neutral
+  const failed = !row.ok && !!row.error
   return (
     <VStack
-      spacing={5}
+      spacing={3}
       alignment="leading"
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
     >
-      <HStack spacing={4}>
-        <Image systemName={row.icon} font={11} foregroundStyle={color} />
-        <Text font={11} foregroundStyle={W.dim} lineLimit={1}>
-          {row.account.label}
-        </Text>
-        <Spacer />
-      </HStack>
+      <Line segs={prompt("quota")} />
       <Spacer />
-      <Text font={28} fontWeight="bold" lineLimit={1} foregroundStyle={color}>
-        {primaryText(row)}
-      </Text>
-      <Text font={10} foregroundStyle={W.dim} lineLimit={1}>
-        {!row.ok && row.error ? row.error : (metric?.label ?? row.providerName)}
-      </Text>
-      {row.primary?.used !== undefined ? (
-        <Bar used={row.primary.used} color={color} width={contentWidth} />
+      <Text
+        styledText={{
+          fontDesign: "monospaced",
+          font: 30,
+          fontWeight: "semibold",
+          content: [{ content: failed ? "fail" : (m?.primary ?? "—"), foregroundColor: color }],
+        }}
+        lineLimit={1}
+      />
+      <Line
+        segs={[{ t: `${row.account.label}${m ? " " + m.metric.label : ""}`, c: P.dim }]}
+        size={10}
+      />
+      {m?.used !== undefined ? (
+        <Line segs={[{ t: blockBar(m.used, 10), c: color }]} />
       ) : null}
       <Spacer />
-      <Text font={9} foregroundStyle={W.faint} lineLimit={1}>
-        {metric?.resetAt
-          ? fmtReset(metric.resetAt, now)
-          : `${rows.length} 个账户 · ${fmtAgo(updatedAt, now)}`}
-      </Text>
+      <Line
+        segs={[
+          {
+            t: m?.metric.resetAt ? fmtReset(m.metric.resetAt, now) : `updated ${fmtClock(now)}`,
+            c: P.faint,
+          },
+        ]}
+        size={10}
+      />
     </VStack>
   )
 }
 
-function MediumView({ rows, totals, updatedAt }: ViewProps) {
+/** 中 / 大尺寸：树形清单。 */
+function ListView({ rows, totals, updatedAt }: ViewProps) {
   if (rows.length === 0) return <Empty />
+
+  // 按行预算铺，铺不下就停——不做省略号，终端输出本来就是截断的
+  const lines: Seg[][] = []
+  let shown = 0
+  for (const row of rows) {
+    const budget = Math.max(0, LAYOUT.rows - lines.length - 1)
+    if (budget <= 0) break
+    const block = accountLines(row, isLarge ? 4 : 2)
+    if (lines.length + block.length > LAYOUT.rows) break
+    lines.push(...block)
+    shown++
+  }
+
+  const alarming = totals.bad + totals.failed
   return (
     <VStack
-      spacing={7}
+      spacing={1}
       alignment="leading"
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
     >
-      <Header totals={totals} updatedAt={updatedAt} />
-      {rows.slice(0, 4).map((row) => (
-        <Row key={row.account.id} row={row} barWidth={contentWidth} />
+      <Line segs={prompt(isLarge ? "ai-quota --tree" : "ai-quota")} />
+      {lines.map((segs, i) => (
+        <Line key={String(i)} segs={segs} />
       ))}
       <Spacer />
+      <HStack spacing={0}>
+        <Line
+          segs={[
+            { t: `${shown}/${rows.length} accounts`, c: P.faint },
+            { t: "  ", c: P.faint },
+            ...(alarming > 0
+              ? ([
+                  { t: String(alarming), c: P.bad },
+                  { t: " alert  ", c: P.faint },
+                ] as Seg[])
+              : []),
+            { t: fmtClock(updatedAt || now), c: P.faint },
+          ]}
+          size={10}
+        />
+        <Spacer />
+      </HStack>
     </VStack>
   )
 }
 
-function LargeView({ rows, totals, updatedAt }: ViewProps) {
-  if (rows.length === 0) return <Empty />
-  return (
-    <VStack
-      spacing={9}
-      alignment="leading"
-      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
-    >
-      <Header totals={totals} updatedAt={updatedAt} />
-      {rows.slice(0, 7).map((row) => (
-        <VStack
-          key={row.account.id}
-          spacing={3}
-          alignment="leading"
-          frame={{ maxWidth: "infinity", alignment: "leading" }}
-        >
-          <Row row={row} barWidth={contentWidth} />
-          {row.metrics.slice(1, 3).map((sub) => (
-            <HStack key={sub.metric.id} spacing={5}>
-              <Text font={10} foregroundStyle={W.faint} lineLimit={1}>
-                {sub.metric.label}
-              </Text>
-              <Spacer />
-              <Text font={10} foregroundStyle={W_STATUS[sub.status]}>
-                {sub.primary}
-              </Text>
-            </HStack>
-          ))}
-        </VStack>
-      ))}
-      <Spacer />
-    </VStack>
-  )
-}
-
-/** 锁屏。这里不能自己画背景，交给系统。 */
+/** 锁屏：一行文字，背景交给系统。 */
 function AccessoryView({ rows }: ViewProps) {
   const row = rows[0]
   if (!row) {
     return (
       <VStack alignment="leading">
-        <Text font="caption">AI 额度</Text>
-        <Text font="caption2">未配置账户</Text>
+        <Text font="caption2">ai-quota</Text>
+        <Text font="caption">no accounts</Text>
       </VStack>
     )
   }
-  const metric = row.primary?.metric
+  const m = row.primary
   return (
     <VStack spacing={1} alignment="leading">
       <Text font="caption2" widgetAccentable lineLimit={1}>
         {row.account.label}
+        {m ? ` ${m.metric.label}` : ""}
       </Text>
       <Text font="headline" lineLimit={1}>
-        {primaryText(row)}
+        {!row.ok && row.error ? "fail" : (m?.primary ?? "—")}
       </Text>
       <Text font="caption2" lineLimit={1}>
-        {metric?.resetAt ? fmtReset(metric.resetAt, now) : row.providerName}
+        {m?.metric.resetAt ? fmtReset(m.metric.resetAt, now) : row.providerName}
       </Text>
     </VStack>
   )
 }
 
-interface ViewProps {
-  rows: AccountRow[]
-  totals: Totals
-  updatedAt: number
-}
-
-function Content(props: ViewProps) {
-  if (isAccessory) return <AccessoryView {...props} />
-  if (isSmall) return <SmallView {...props} />
-  if (isLarge) return <LargeView {...props} />
-  return <MediumView {...props} />
-}
-
-/** 桌面尺寸自己画底；锁屏交给系统。背景用扁平色 + backgroundColor，见文件顶部。 */
 function Body(props: ViewProps) {
-  if (isAccessory) return <Content {...props} />
+  if (isAccessory) return <AccessoryView {...props} />
   return (
     <VStack
-      padding={14}
+      padding={{ leading: 15, trailing: 15, top: 13, bottom: 13 }}
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
-      backgroundColor={W.bg}
+      backgroundColor={P.bg}
     >
-      <Content {...props} />
+      {isSmall ? <SmallView {...props} /> : <ListView {...props} />}
     </VStack>
   )
 }
@@ -290,15 +298,21 @@ function Body(props: ViewProps) {
 function Failed({ message }: { message: string }) {
   return (
     <VStack
-      spacing={4}
-      padding={12}
-      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-      backgroundColor={W.bg}
+      spacing={3}
+      padding={13}
+      alignment="leading"
+      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
+      backgroundColor={P.bg}
     >
-      <Image systemName="exclamationmark.triangle.fill" font={16} foregroundStyle={W.bad} />
-      <Text font={10} foregroundStyle={W.dim} multilineTextAlignment="center" lineLimit={4}>
-        {message}
-      </Text>
+      <Line segs={prompt("ai-quota")} />
+      <Text
+        styledText={{
+          fontDesign: "monospaced",
+          font: 10,
+          content: [{ content: message, foregroundColor: P.bad }],
+        }}
+        lineLimit={6}
+      />
     </VStack>
   )
 }
@@ -315,7 +329,6 @@ async function run() {
     refreshMinutes = config.settings.refreshMinutes
     tapToRefresh = config.settings.widgetTap !== "open"
 
-    // 小组件能联网（样本证明了这一点），所以自刷新回来了。
     let selfRefreshed = false
     if (
       config.settings.widgetSelfRefresh &&
@@ -326,9 +339,7 @@ async function run() {
         const outcome = await refreshAccounts(config, snapshot)
         snapshot = outcome.snapshot
         await saveSnapshot(snapshot)
-        // **换到的新凭据一定要存。** 以前这里只存快照，于是 OAuth 的 access token
-        // 每次渲染都重换一遍、换完就丢，很快把 token 端点打成 429。
-        // applyConfigPatches 是读盘改字段再写回，不会覆盖主 App 那边的改动。
+        // 换到的新凭据一定要存，否则下次渲染会重放旧的 refresh token
         await applyConfigPatches(outcome.configPatches)
         selfRefreshed = true
       } catch {
@@ -343,7 +354,7 @@ async function run() {
       updatedAt: snapshot.updatedAt,
     }
 
-    // 诊断必须写在 present 之前 —— present 之后当前执行上下文立刻销毁。
+    // 诊断必须写在 present 之前 —— present 之后当前执行上下文立刻销毁
     await writeWidgetDiag({
       renderedAt: now,
       family,
@@ -355,14 +366,11 @@ async function run() {
     failure = String(error)
   }
 
-  // present 之后当前上下文立刻销毁，所以整个函数只在末尾调一次，
-  // 所有分支在它之前收敛完 —— 不写成「present 完再 return」，那个 return 是死代码。
-  //
-  // 整块小组件就是刷新按钮。**Button 的内容走 children，不是 label 属性**：
-  // 用 label 那一版实测一片漆黑，这里是照着能跑的样本改的。
+  // present 只在末尾调一次，所有分支在它之前收敛完。
+  // Button 的内容走 children，不是 label 属性 —— 后者实测一片漆黑。
   const presented =
     failure !== null ? (
-      <Failed message={`小组件出错：${failure}`} />
+      <Failed message={failure} />
     ) : tapToRefresh ? (
       <Button intent={RefreshQuotaIntent(undefined)} buttonStyle="plain">
         <Body {...props} />

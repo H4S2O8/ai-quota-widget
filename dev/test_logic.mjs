@@ -34,6 +34,7 @@ const M = await build("p_moonshot.ts")
 const K = await build("p_kimicode.ts")
 const C = await build("p_commandcode.ts")
 const X = await build("p_codex.ts")
+const TM = await build("term.ts")
 const V = await build("view.ts")
 const R = await build("refresh.ts")
 
@@ -320,6 +321,23 @@ eq("认不出的字段给 undefined", U.credentialFor("baseUrl", U.extractCreden
   const nested = JSON.stringify({ access_token: "outer", old: { access_token: "inner" } })
   eq("外层的先到先得", U.credentialFor("accessToken", U.extractCredentials(nested)), "outer")
 }
+
+console.log("\n== 终端排版：中文是双宽字符 ==")
+eq("ASCII 宽度", TM.displayWidth("claude"), 6)
+eq("中文算两列", TM.displayWidth("硅基流动"), 8)
+eq("中英混排", TM.displayWidth("Kimi 代码"), 9)
+eq("补齐到列宽（ASCII）", TM.displayWidth(TM.padEnd("claude", 10)), 10)
+eq("补齐到列宽（中文）", TM.displayWidth(TM.padEnd("硅基流动", 10)), 10)
+eq("超长要截断并留省略号", TM.padEnd("openrouter", 9), "openrout…")
+eq("截断后仍是目标宽度", TM.displayWidth(TM.padEnd("openrouter", 9)), 9)
+eq("中文截断也对齐", TM.displayWidth(TM.padEnd("硅基流动服务", 8)), 8)
+eq("右对齐", TM.padStart("58%", 6), "   58%")
+eq("方块条 0%", TM.blockBar(0, 8), "░░░░░░░░")
+eq("方块条 100%", TM.blockBar(1, 8), "████████")
+eq("方块条 50%", TM.blockBar(0.5, 8), "████░░░░")
+// 0 和「很小但不是 0」在界面上必须看起来不一样
+eq("极小值也画一格", TM.blockBar(0.004, 8), "█░░░░░░░")
+eq("越界值被夹住", TM.blockBar(2, 8), "████████")
 
 console.log("\n== 增长式与扣除式统一 ==")
 // 同一屏里，Claude 的「已用 42%」和 DeepSeek 的「余额 ¥12.5」要读出同一个方向
