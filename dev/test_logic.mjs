@@ -291,6 +291,36 @@ console.log("\n== 换 token 失败要退避 ==")
   check("退避窗口内不允许换 token", !(blocked.refreshBlockedUntil > now2) === false)
   check("退避到期后恢复允许", expired.refreshBlockedUntil < now2)
 }
+console.log("\n== 从凭据文件里认字段 ==")
+// Codex 的 auth.json 形状
+const codexAuth = JSON.stringify({
+  auth_mode: "chatgpt",
+  tokens: { access_token: "acc-1", refresh_token: "ref-1", account_id: "org-9" },
+})
+{
+  const found = U.extractCredentials(codexAuth)
+  eq("认出 access_token", U.credentialFor("accessToken", found), "acc-1")
+  eq("认出 refresh_token", U.credentialFor("refreshToken", found), "ref-1")
+  eq("认出 account_id", U.credentialFor("accountId", found), "org-9")
+}
+// Claude 的 .credentials.json 形状（驼峰、嵌套）
+const claudeAuth = JSON.stringify({
+  claudeAiOauth: { accessToken: "sk-ant-oat-x", refreshToken: "sk-ant-ort-y", expiresAt: 1 },
+})
+{
+  const found = U.extractCredentials(claudeAuth)
+  eq("驼峰也认", U.credentialFor("refreshToken", found), "sk-ant-ort-y")
+  // anthropic provider 的 access token 字段叫 token
+  eq("token 字段回退到 accessToken", U.credentialFor("token", found), "sk-ant-oat-x")
+}
+eq("不是 JSON 就给空", Object.keys(U.extractCredentials("这不是 json")).length, 0)
+eq("认不出的字段给 undefined", U.credentialFor("baseUrl", U.extractCredentials(codexAuth)), undefined)
+// 外层优先：嵌套深处的历史残留不该顶掉正主
+{
+  const nested = JSON.stringify({ access_token: "outer", old: { access_token: "inner" } })
+  eq("外层的先到先得", U.credentialFor("accessToken", U.extractCredentials(nested)), "outer")
+}
+
 console.log("\n== 增长式与扣除式统一 ==")
 // 同一屏里，Claude 的「已用 42%」和 DeepSeek 的「余额 ¥12.5」要读出同一个方向
 const grow = { id: "g", label: "5 小时", kind: "percent", value: 42 }

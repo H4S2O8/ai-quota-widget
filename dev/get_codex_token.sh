@@ -49,19 +49,21 @@ print(f"refresh_token = {mask(refresh)}")
 print()
 
 # account_id 不敏感，直接给出来；两个 token 分别复制
-# 主角是 refresh_token：access_token 会被自动换出来。
-payload = refresh or access
+# 复制**整段 JSON**：手机上点一次「粘贴凭据」就能把所有字段一起填好。
+# 手打三个长字符串没人会做，而带轮换的 token 需要偶尔重新同步。
+payload = json.dumps(auth, ensure_ascii=False)
 try:
     subprocess.run(["pbcopy"], input=payload.encode(), check=True)
-    print(f"{'refresh_token' if refresh else 'access_token'} 已复制到剪贴板。")
+    print("整段凭据已复制到剪贴板。")
 except Exception:
     print("没有 pbcopy，自己从 auth.json 里复制。")
 
 print()
-print("手机上：AI 额度 → 添加账户 → Codex / ChatGPT")
-print(f"  account_id     直接输入：{account}")
-print( "  refresh_token  长按粘贴（已在剪贴板）")
-print( "  access_token   留空即可，App 会用 refresh_token 换出来")
+print("手机上：AI 额度 → Codex 账户页 → 点右上角「粘贴凭据」")
+print("  三个字段会一起填好，不用手打。")
+print()
+print("注意：电脑上的 Codex CLI 每次续期都会轮换 refresh token，")
+print("手机上这份就会失效。报 invalidated 的时候，回来重跑一次本脚本再粘一次即可。")
 if not refresh:
     print()
     print("auth.json 里没有 refresh_token —— 那就只能填 access_token，几小时后要重取。")

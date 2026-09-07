@@ -75,7 +75,7 @@ if [ -z "$TOKEN" ]; then
   exit 1
 fi
 
-printf %s "${REFRESH:-$TOKEN}" | pbcopy 2>/dev/null && COPIED="已把 ${REFRESH:+refresh }token 复制到剪贴板" || COPIED="（没有 pbcopy，自己复制）"
+printf %s "$RAW" | pbcopy 2>/dev/null && COPIED="整段凭据已复制到剪贴板（手机上点「粘贴凭据」一键填入）" || COPIED="（没有 pbcopy，自己复制）"
 
 mask() {
   printf "%s…%s（共 %s 字符）" "$(printf %s "$1" | cut -c1-12)" "$(printf %s "$1" | rev | cut -c1-4 | rev)" "$(printf %s "$1" | wc -c | tr -d ' ')"

@@ -155,11 +155,13 @@ export function explainAuthFailure(json: unknown, text: string): string | undefi
 
   if (codeStr === "refresh_token_invalidated" || /invalidated/i.test(msgStr)) {
     return (
-      "refresh token 已被作废。最常见的原因是它同时被两个地方用了——" +
-      "电脑上的 CLI 和这个 App 各续各的，OAuth 会把旧 token 的再次使用判定为重放，" +
-      "然后撤销整个 token 家族。\n\n" +
-      "怎么办：在电脑上重新登录一次；然后**只填 access token，别填 refresh token**，" +
-      "这样两边就不会再抢同一个家族。代价是几小时后要回电脑重取一次。"
+      "这台手机上的 refresh token 已经过期了——不是它坏了，是被换掉了。\n\n" +
+      "OAuth 的 refresh token 每次使用都会轮换：电脑上的 CLI 每续期一次，" +
+      "就会签发一个新的并作废旧的。你粘过来的是当时那一份，CLI 之后又续过，" +
+      "手里这份就成了旧的。\n\n" +
+      "怎么办：在电脑上跑一次取凭据的脚本，把最新的整段 JSON 复制过来，" +
+      "在这一页点「粘贴凭据」一键填入。只要电脑上的 CLI 还在用，这一步就得偶尔重做一次；" +
+      "想彻底免掉，就改成只填 access token（不碰轮换，但几小时要重取一次）。"
     )
   }
   if (codeStr === "invalid_grant" || /not found or invalid/i.test(msgStr)) {
@@ -167,6 +169,70 @@ export function explainAuthFailure(json: unknown, text: string): string | undefi
   }
   if (msgStr) return msgStr
   return text.trim() ? undefined : undefined
+}
+
+/**
+ * 从一段 JSON（CLI 的凭据文件原文）里认出凭据字段。
+ *
+ * 各家的键名不一样（`access_token` / `accessToken` / `token`），层级也不一样，
+ * 所以按「归一化名字」在整棵树里找，而不是写死路径。
+ *
+ * 存在的理由很实际：带轮换的 refresh token 被电脑上的 CLI 换掉之后，手机这份就废了，
+ * 需要重新同步。如果重新同步意味着在手机上手打三个长字符串，那没人会去做——
+ * 于是这个功能实际上就是不可用的。一键粘贴才让「偶尔重同步」变成可以接受的方案。
+ */
+export function extractCredentials(text: string): Record<string, string> {
+  let json: unknown
+  try {
+    json = JSON.parse(text)
+  } catch {
+    return {}
+  }
+  const found: Record<string, string> = {}
+  const norm = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "")
+
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item)
+      return
+    }
+    if (!node || typeof node !== "object") return
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (typeof value === "string" && value) {
+        const n = norm(key)
+        // 先到先得：外层的通常是正主，嵌套深处可能是历史残留
+        if (!(n in found)) found[n] = value
+      } else {
+        walk(value)
+      }
+    }
+  }
+  walk(json)
+  return found
+}
+
+/** 把认出来的凭据映射到某个字段上。`token` 也认 access token。 */
+export function credentialFor(fieldKey: string, found: Record<string, string>): string | undefined {
+  const n = fieldKey.toLowerCase().replace(/[^a-z0-9]/g, "")
+  const candidates =
+    n === "token" ? ["token", "accesstoken"] : n === "accesstoken" ? ["accesstoken", "token"] : [n]
+  for (const c of candidates) {
+    if (found[c]) return found[c]
+  }
+  return undefined
+}
+
+/** 读剪贴板。Pasteboard 是现行 API，Clipboard 是废弃的旧名。 */
+export function readClipboard(): string {
+  try {
+    const pb = (globalThis as any).Pasteboard
+    if (pb?.getString) return String(pb.getString() ?? "")
+    const cb = (globalThis as any).Clipboard
+    if (cb?.getText) return String(cb.getText() ?? "")
+  } catch {
+    // 落到返回空串
+  }
+  return ""
 }
 
 /** 复制到剪贴板。Pasteboard 是现行 API，Clipboard 是废弃的旧名，都试一下。 */

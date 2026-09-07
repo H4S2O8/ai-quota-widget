@@ -31,7 +31,10 @@ import { ACCENT, STATUS_COLOR } from "./theme"
 import { Card, FieldLabel, SectionTitle, Well } from "./ui"
 import {
   copyToClipboard,
+  credentialFor,
   errorMessage,
+  extractCredentials,
+  readClipboard,
   fmtMetricDetail,
   fmtMetricValue,
   newId,
@@ -91,6 +94,40 @@ export function AccountEditor({
   function warnValue(): number | undefined {
     const parsed = Number(warnText.trim())
     return warnText.trim() && Number.isFinite(parsed) ? parsed : undefined
+  }
+
+  /**
+   * 从剪贴板里的一段 JSON 认出凭据并填进对应的格子。
+   *
+   * 这是为「refresh token 被电脑上的 CLI 轮换掉之后要重新同步」准备的。
+   * 如果重同步意味着在手机上手打三个长字符串，那这条路实际上就是不可用的。
+   */
+  function pasteCredentials() {
+    const text = readClipboard().trim()
+    if (!text) {
+      setStatus("剪贴板是空的。先在电脑上运行取凭据的脚本。")
+      return
+    }
+    const found = extractCredentials(text)
+    if (Object.keys(found).length === 0) {
+      setStatus("剪贴板里不是能识别的 JSON。请复制凭据文件的**整段内容**。")
+      return
+    }
+    const next = { ...account.config }
+    const filled: string[] = []
+    for (const field of provider.fields) {
+      const value = credentialFor(field.key, found)
+      if (value && value !== next[field.key]) {
+        next[field.key] = value
+        filled.push(field.label)
+      }
+    }
+    if (filled.length === 0) {
+      setStatus(`认出了 ${Object.keys(found).length} 个字段，但没有一个对得上这个服务商需要的。`)
+      return
+    }
+    patch({ config: next })
+    setStatus(`已填入：${filled.join("、")}。可以点「现在抓取」验证了。`)
   }
 
   async function test() {
@@ -186,7 +223,21 @@ export function AccountEditor({
 
         {provider.fields.length > 0 ? (
           <Card>
-            <SectionTitle text="凭据与参数" />
+            <SectionTitle
+              text="凭据与参数"
+              trailing={
+                <Button
+                  title="粘贴凭据"
+                  systemImage="doc.on.clipboard"
+                  controlSize="small"
+                  action={pasteCredentials}
+                />
+              }
+            />
+            <Text font={11} foregroundStyle="tertiaryLabel">
+              在电脑上把凭据文件整段复制过来，点「粘贴凭据」自动填进下面的格子——
+              不用手打。带轮换的 token 被电脑那边换掉之后，重来一次即可。
+            </Text>
             {provider.fields.map((field) => (
               <Group key={field.key}>
                 <FieldLabel
