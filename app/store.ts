@@ -86,6 +86,35 @@ export async function loadConfig(): Promise<AppConfig> {
   return normalizeConfig(raw)
 }
 
+/**
+ * 只把指定账户的指定字段合并进磁盘上的配置。
+ *
+ * 用于 provider 在抓取过程中换到的新凭据（OAuth 的 access token 会轮换）。
+ *
+ * **必须是「读盘 → 改几个字段 → 写回」，不能拿内存里的整个 config 覆盖。**
+ * 小组件和主 App 是两个进程，各自都可能在写；整份覆盖会把对方刚写的东西抹掉。
+ * 这里只动 patch 里点名的那几个 key，其余原样保留。
+ *
+ * 小组件以前不写配置（怕互相覆盖），代价是它每次换到的新 token 都被丢掉，
+ * 下次渲染再换一次——反复换把 OAuth 端点打成了 429。所以这个函数存在。
+ */
+export async function applyConfigPatches(
+  patches: Record<string, Record<string, string>>,
+): Promise<void> {
+  const ids = Object.keys(patches)
+  if (ids.length === 0) return
+  const config = await loadConfig()
+  let changed = false
+  const accounts = config.accounts.map((account) => {
+    const patch = patches[account.id]
+    if (!patch) return account
+    changed = true
+    return { ...account, config: { ...account.config, ...patch } }
+  })
+  if (!changed) return
+  await saveConfig({ ...config, accounts })
+}
+
 export async function saveConfig(config: AppConfig): Promise<void> {
   await writeJson(configPath(), config)
 }

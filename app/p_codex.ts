@@ -89,7 +89,19 @@ export const codexProvider: Provider = {
             "或者重新跑一次 codex login 再取一次凭据。",
         )
       }
-      const refreshed = await refreshAccessToken(refreshToken, ctx.timeoutSec)
+      if (!ctx.allowTokenRefresh) {
+        throw new Error(
+          "access_token 已过期，而上一次换新的也失败了，正在退避中（半小时内不再重试）。" +
+            "多半是 refresh_token 也失效了——在电脑上重新跑一次 codex login 再取一次凭据。",
+        )
+      }
+      let refreshed
+      try {
+        refreshed = await refreshAccessToken(refreshToken, ctx.timeoutSec)
+      } catch (error) {
+        ctx.onTokenRefreshFailed()
+        throw error
+      }
       token = refreshed.accessToken
       ctx.updateConfig({
         accessToken: refreshed.accessToken,
@@ -147,7 +159,15 @@ async function refreshAccessToken(
   )
   const next = getPath(resp.json, "access_token")
   if (!resp.ok || typeof next !== "string" || !next) {
-    throw new Error(`换 token 失败：${describeHttpError(resp, "刷新被拒")}`)
+    // 这里之前只说「刷新被拒 (200)」——状态码 200 配「被拒」，而且没说服务器
+    // 到底返回了什么。只能靠错误文字排查的界面上，那种消息等于没有。
+    const known =
+      getPath(resp.json, "error_description") ?? getPath(resp.json, "error") ?? getPath(resp.json, "message")
+    const detail =
+      typeof known === "string" && known.trim()
+        ? `${known.trim()} (HTTP ${resp.status})`
+        : `HTTP ${resp.status}，服务器返回：${resp.text.trim().slice(0, 300) || "（空）"}`
+    throw new Error(`换 token 失败：${detail}`)
   }
   const rotated = getPath(resp.json, "refresh_token")
   return {

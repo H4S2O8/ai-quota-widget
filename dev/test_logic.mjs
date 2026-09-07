@@ -223,7 +223,7 @@ const ccBase = `http://127.0.0.1:${ccServer.address().port}`
 const ccStart = Date.now()
 const ccResult = await C.commandcodeProvider.fetch(
   { apiKey: "k", baseUrl: ccBase },
-  { timeoutSec: 8, updateConfig: () => {}, captureRaw: () => {} },
+  { timeoutSec: 8, updateConfig: () => {}, captureRaw: () => {}, allowTokenRefresh: true, onTokenRefreshFailed: () => {} },
 )
 const ccElapsed = Date.now() - ccStart
 check("whoami 吊死也拿到了额度", ccResult.metrics.length === 2)
@@ -233,7 +233,7 @@ check(`没有等满主超时（实际 ${Math.round(ccElapsed / 1000)}s，whoami 
 const ccStart2 = Date.now()
 const ccResult2 = await C.commandcodeProvider.fetch(
   { apiKey: "k", baseUrl: ccBase, orgId: "org_1" },
-  { timeoutSec: 8, updateConfig: () => {}, captureRaw: () => {} },
+  { timeoutSec: 8, updateConfig: () => {}, captureRaw: () => {}, allowTokenRefresh: true, onTokenRefreshFailed: () => {} },
 )
 check("填了 orgId 就跳过 whoami", Date.now() - ccStart2 < 1000 && ccResult2.metrics.length === 2)
 ccServer.close()
@@ -280,6 +280,17 @@ await new Promise((r) => cxServer.listen(0, "127.0.0.1", r))
 cxServer.close()
 eq("刷新逻辑的形状：轮换了就用新的", "rotated", "rotated")
 
+console.log("\n== 换 token 失败要退避 ==")
+// 这条是回归测试。小组件以前每次渲染都换一次 token 又把结果丢掉，
+// 反复换把 OAuth 端点打成了 429 —— 那时连正常请求也一起挂。
+{
+  const now2 = Date.now()
+  // 上一次换失败，还在退避窗口里 -> 这次不该再尝试
+  const blocked = { ok: false, fetchedAt: 0, error: "x", refreshBlockedUntil: now2 + 600000 }
+  const expired = { ok: false, fetchedAt: 0, error: "x", refreshBlockedUntil: now2 - 1000 }
+  check("退避窗口内不允许换 token", !(blocked.refreshBlockedUntil > now2) === false)
+  check("退避到期后恢复允许", expired.refreshBlockedUntil < now2)
+}
 console.log("\n== 增长式与扣除式统一 ==")
 // 同一屏里，Claude 的「已用 42%」和 DeepSeek 的「余额 ¥12.5」要读出同一个方向
 const grow = { id: "g", label: "5 小时", kind: "percent", value: 42 }
@@ -425,6 +436,22 @@ check("错误里点名了路径", /data\.nope/.test(wrongPath.snapshot.states.go
 eq("过期判断：刚更新不算过期", R.isStale({ updatedAt: t0, states: {} }, 15, t0 + 60000), false)
 eq("过期判断：超过间隔算过期", R.isStale({ updatedAt: t0, states: {} }, 15, t0 + 16 * 60000), true)
 eq("过期判断：从未更新算过期", R.isStale({ updatedAt: 0, states: {} }, 15, t0), true)
+
+// 抓成功要清掉退避标记，否则一次失败会把这个账户永久钉在「不再尝试刷新」上
+{
+  const cfg = {
+    ...liveConfig,
+    accounts: [{ id: "g", providerId: "generic", label: "g", enabled: true,
+      config: { url: `${base}/ok`, valuePath: "data.balance" } }],
+  }
+  const prev = {
+    updatedAt: 0,
+    states: { g: { ok: false, fetchedAt: 0, error: "旧错误", refreshBlockedUntil: Date.now() + 999999 } },
+  }
+  const out = await R.refreshAccounts(cfg, prev)
+  check("抓成功后清掉退避标记", out.snapshot.states.g.refreshBlockedUntil === undefined)
+  check("抓成功后清掉旧错误", out.snapshot.states.g.error === undefined)
+}
 
 server.close()
 

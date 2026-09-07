@@ -40,7 +40,14 @@ import {
 } from "scripting"
 import { RefreshQuotaIntent } from "./app_intents"
 import { isStale, refreshAccounts } from "./refresh"
-import { loadConfig, loadSnapshot, probeKeychain, saveSnapshot, writeWidgetDiag } from "./store"
+import {
+  applyConfigPatches,
+  loadConfig,
+  loadSnapshot,
+  probeKeychain,
+  saveSnapshot,
+  writeWidgetDiag,
+} from "./store"
 import { W, W_STATUS } from "./theme"
 import type { AccountRow } from "./view"
 import { buildRows, enabledRows, sortBySeverity, summarize } from "./view"
@@ -309,7 +316,6 @@ async function run() {
     tapToRefresh = config.settings.widgetTap !== "open"
 
     // 小组件能联网（样本证明了这一点），所以自刷新回来了。
-    // 只写快照不写配置：config 的写入权归主 App，避免两个进程互相覆盖。
     let selfRefreshed = false
     if (
       config.settings.widgetSelfRefresh &&
@@ -320,6 +326,10 @@ async function run() {
         const outcome = await refreshAccounts(config, snapshot)
         snapshot = outcome.snapshot
         await saveSnapshot(snapshot)
+        // **换到的新凭据一定要存。** 以前这里只存快照，于是 OAuth 的 access token
+        // 每次渲染都重换一遍、换完就丢，很快把 token 端点打成 429。
+        // applyConfigPatches 是读盘改字段再写回，不会覆盖主 App 那边的改动。
+        await applyConfigPatches(outcome.configPatches)
         selfRefreshed = true
       } catch {
         // 抓不到就显示旧数据，比空着强

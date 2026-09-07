@@ -69,6 +69,16 @@ export interface FetchContext {
    * 凡是靠推断解析的 provider 都要把原文留下来，让人能直接看到它到底返回了什么。
    */
   captureRaw: (text: string) => void
+  /**
+   * 现在允不允许拿 refresh token 去换新的 access token。
+   *
+   * 为 false 说明上一次换失败了，还在退避窗口里。**必须尊重它**：
+   * OAuth 的 token 端点会限流，一个坏掉的 refresh token 配上每次渲染都重试，
+   * 很快就会把整个账户打成 429——那时连本来能成功的请求也一起挂掉。
+   */
+  allowTokenRefresh: boolean
+  /** 换 token 失败时调一下，调用方会记下来并退避一段时间。 */
+  onTokenRefreshFailed: () => void
 }
 
 export interface Provider {
@@ -155,6 +165,13 @@ export interface AccountState {
   errorAt?: number
   /** 最近一次抓取的原始响应（截断），只有部分 provider 会记 */
   raw?: string
+  /**
+   * 换 token 失败后的退避截止时间。
+   *
+   * 在此之前不再尝试刷新，直接报「凭据已过期」。这是为了不把 OAuth 的 token
+   * 端点打成 429——它一旦限流，连正常的请求也会跟着失败，症状会变得完全看不懂。
+   */
+  refreshBlockedUntil?: number
 }
 
 export interface Snapshot {

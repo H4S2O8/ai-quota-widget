@@ -32,6 +32,7 @@ import { PROVIDERS } from "./providers"
 import { isStale, refreshAccounts } from "./refresh"
 import {
   EMPTY_CONFIG,
+  applyConfigPatches,
   loadConfig,
   loadSnapshot,
   readWidgetDiag,
@@ -506,17 +507,12 @@ function MainView() {
       setSnapshot(outcome.snapshot)
       await saveSnapshot(outcome.snapshot)
 
-      // provider 在抓取过程中要求写回的凭据（例如刷新过的 token）
-      const patches = Object.keys(outcome.configPatches)
-      if (patches.length > 0) {
-        commitConfig({
-          ...cfg,
-          accounts: cfg.accounts.map((a) =>
-            outcome.configPatches[a.id]
-              ? { ...a, config: { ...a.config, ...outcome.configPatches[a.id] } }
-              : a,
-          ),
-        })
+      // provider 在抓取过程中换到的新凭据（OAuth 的 access token 会轮换）。
+      // 走 applyConfigPatches：读盘、只改点名的字段、写回——小组件那边也在写同
+      // 一份配置，整份覆盖会把它刚存的新 token 抹掉。
+      if (Object.keys(outcome.configPatches).length > 0) {
+        await applyConfigPatches(outcome.configPatches)
+        setConfig(await loadConfig())
       }
 
       Widget.reloadAll()

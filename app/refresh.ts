@@ -16,6 +16,8 @@ import { errorMessage } from "./util"
 
 /** 原始响应留多少字符。够看清结构，又不至于把快照撑大。 */
 const RAW_LIMIT = 4000
+/** 换 token 失败后，多久之内不再尝试。见 AccountState.refreshBlockedUntil。 */
+const REFRESH_BACKOFF_MS = 30 * 60 * 1000
 const MAX_CONCURRENT = 4
 
 export interface RefreshOutcome {
@@ -68,6 +70,10 @@ async function fetchOne(
   const provider = providerOrPlaceholder(account.providerId)
   let patch: Record<string, string> | undefined
   let raw: string | undefined
+  let refreshFailed = false
+
+  const blockedUntil = previous?.refreshBlockedUntil
+  const allowTokenRefresh = !(blockedUntil !== undefined && blockedUntil > Date.now())
 
   try {
     const result = await provider.fetch(account.config, {
@@ -77,6 +83,10 @@ async function fetchOne(
       },
       captureRaw: (text) => {
         raw = text.length > RAW_LIMIT ? `${text.slice(0, RAW_LIMIT)}\n…（已截断）` : text
+      },
+      allowTokenRefresh,
+      onTokenRefreshFailed: () => {
+        refreshFailed = true
       },
     })
     return {
@@ -88,6 +98,8 @@ async function fetchOne(
         // 成功后清掉错误，但保留它发生的时间没有意义，一并清掉
         error: undefined,
         errorAt: undefined,
+        // 成功了就解除退避
+        refreshBlockedUntil: undefined,
       },
       patch,
     }
@@ -101,6 +113,9 @@ async function fetchOne(
         raw: raw ?? previous?.raw,
         error: errorMessage(error),
         errorAt: Date.now(),
+        refreshBlockedUntil: refreshFailed
+          ? Date.now() + REFRESH_BACKOFF_MS
+          : blockedUntil,
       },
       patch,
     }

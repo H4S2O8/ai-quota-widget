@@ -105,7 +105,21 @@ export const anthropicProvider: Provider = {
             "把 refresh token 也填上就能自动续，不用每次手动重取。",
         )
       }
-      const refreshed = await refreshTokens(refreshToken, ctx.timeoutSec)
+      if (!ctx.allowTokenRefresh) {
+        throw new Error(
+          "access token 已过期，而上一次换新的也失败了，正在退避中（半小时内不再重试）。" +
+            "多半是 refresh token 也过期或被轮换掉了——回电脑上重新取一次凭据。",
+        )
+      }
+      let refreshed
+      try {
+        refreshed = await refreshTokens(refreshToken, ctx.timeoutSec)
+      } catch (error) {
+        // 告诉调用方去退避。不退避的话，每次渲染都来换一遍，
+        // 很快会把 token 端点打成 429，那时连错误信息都会变得看不懂。
+        ctx.onTokenRefreshFailed()
+        throw error
+      }
       token = refreshed.accessToken
       ctx.updateConfig({ token: refreshed.accessToken, refreshToken: refreshed.refreshToken })
       resp = await getUsage(token, ctx.timeoutSec)
@@ -164,10 +178,7 @@ async function refreshTokens(
   )
   const next = getPath(resp.json, "access_token")
   if (!resp.ok || typeof next !== "string" || !next) {
-    const detail = getPath(resp.json, "error_description") ?? getPath(resp.json, "error")
-    throw new Error(
-      `换 token 失败：${typeof detail === "string" ? detail : describeHttpError(resp, "刷新被拒")}`,
-    )
+    throw new Error(`换 token 失败：${refreshFailureDetail(resp)}`)
   }
   const rotated = getPath(resp.json, "refresh_token")
   return {
@@ -175,6 +186,25 @@ async function refreshTokens(
     // refresh token 通常会轮换，返回了就换掉，没返回就沿用旧的
     refreshToken: typeof rotated === "string" && rotated ? rotated : refreshToken,
   }
+}
+
+/**
+ * 换 token 失败时给一句能定位的话。
+ *
+ * 之前这里只输出「刷新被拒 (200)」——状态码是 200，措辞却是「被拒」，
+ * 而且一个字都没说服务器实际返回了什么。**在一个只能靠错误文字排查的界面上，
+ * 这种消息等于没有。** 现在把响应体也带出来。
+ */
+function refreshFailureDetail(resp: { status: number; json: unknown; text: string }): string {
+  const known =
+    getPath(resp.json, "error_description") ??
+    getPath(resp.json, "error.message") ??
+    getPath(resp.json, "error") ??
+    getPath(resp.json, "message")
+  if (typeof known === "string" && known.trim()) return `${known.trim()} (HTTP ${resp.status})`
+  const body = resp.text.trim()
+  if (!body) return `HTTP ${resp.status}，响应体是空的`
+  return `HTTP ${resp.status}，服务器返回：${body.slice(0, 300)}`
 }
 
 /** 导出给 dev/ 的测试用：解析逻辑要能在没有网络的情况下单独验。 */
