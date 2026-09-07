@@ -549,7 +549,20 @@ function MainView() {
     setBusy(true)
     setMessage("正在刷新…")
     try {
-      const outcome = await refreshAccounts(cfg, snap, accounts)
+      // 抓之前重新读一遍配置和快照。
+      //
+      // 小组件是另一个进程，它可能刚刚换过 OAuth token 并写回了磁盘。用内存里
+      // 这份可能已经过期的配置去抓，就会拿一个**已经被轮换掉的 refresh token**
+      // 再换一次——那在 OAuth 里叫重放，服务器会判定 token 被盗，
+      // 直接撤销整个 token 家族，电脑上的 CLI 一起登出。
+      //
+      // 代价只是两次文件读取。
+      const fresh = await loadConfig()
+      const freshSnap = await loadSnapshot()
+      const useCfg: AppConfig = fresh.accounts.length > 0 ? fresh : cfg
+      const useSnap = freshSnap.updatedAt >= snap.updatedAt ? freshSnap : snap
+      setConfig(useCfg)
+      const outcome = await refreshAccounts(useCfg, useSnap, accounts)
       setSnapshot(outcome.snapshot)
       await saveSnapshot(outcome.snapshot)
 
