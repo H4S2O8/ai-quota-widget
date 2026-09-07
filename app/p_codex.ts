@@ -38,6 +38,7 @@ import type { Metric, Provider, ProviderResult } from "./types"
 import {
   describeHttpError,
   getPath,
+  explainAuthFailure,
   looksLikeHtml,
   num,
   requestJson,
@@ -56,9 +57,9 @@ export const codexProvider: Provider = {
   icon: "chevron.left.slash.chevron.right",
   color: "#10A37F",
   help:
-    "读 ChatGPT 订阅的 5 小时 / 7 天用量窗口。填 account_id 和 refresh_token 两个就够了，" +
-    "access_token 会自动换出来。凭据在 codex login 之后写的 ~/.codex/auth.json 里，" +
-    "跑 dev/get_codex_token.sh 取。",
+    "读 ChatGPT 订阅的 5 小时 / 7 天用量窗口。凭据来自 codex login 写的 ~/.codex/auth.json。" +
+    "⚠️ refresh_token 和电脑上的 CLI 共用同一个 token 家族，两边都续期会互相作废——" +
+    "如果你经常用 Codex CLI，建议只填 access_token（几小时重取一次），别填 refresh_token。",
   fields: [
     {
       key: "accountId",
@@ -69,18 +70,22 @@ export const codexProvider: Provider = {
         "它不在 token 里，换不出来，所以必须填。",
     },
     {
-      key: "refreshToken",
-      label: "refresh_token",
-      secret: true,
-      required: true,
-      help: "auth.json 里 tokens.refresh_token。这是长期有效的那个。",
-    },
-    {
       key: "accessToken",
-      label: "access_token（可留空）",
+      label: "access_token",
       secret: true,
       placeholder: "eyJ...",
-      help: "留空即可——会用 refresh_token 自动换出来并存回这里。",
+      help:
+        "auth.json 里 tokens.access_token。只填这个最安全——不碰 token 家族，" +
+        "不会影响电脑上的 CLI。代价是几小时后要回电脑重取一次。",
+    },
+    {
+      key: "refreshToken",
+      label: "refresh_token（可选，有代价）",
+      secret: true,
+      help:
+        "填了能自动续期，但**和电脑上的 CLI 共用同一个 token 家族**。" +
+        "OAuth 的 refresh token 每次使用都会轮换并作废旧的，两边各续各的就会互相踢掉，" +
+        "严重时整个家族被撤销、两边一起登出。经常用 CLI 的话别填。",
     },
   ],
   async fetch(config, ctx): Promise<ProviderResult> {
@@ -91,7 +96,7 @@ export const codexProvider: Provider = {
     const refreshToken = (config.refreshToken ?? "").trim()
 
     if (!token && !refreshToken) {
-      throw new Error("至少要填 refresh_token。access_token 会用它换出来。")
+      throw new Error("至少要填 access_token（或 refresh_token）。")
     }
 
     // 没有 access_token 就直接去换，不发那个注定 401 的请求。
@@ -227,13 +232,11 @@ async function refreshAccessToken(
   if (!resp.ok || typeof next !== "string" || !next) {
     // 这里之前只说「刷新被拒 (200)」——状态码 200 配「被拒」，而且没说服务器
     // 到底返回了什么。只能靠错误文字排查的界面上，那种消息等于没有。
-    const known =
-      getPath(resp.json, "error_description") ?? getPath(resp.json, "error") ?? getPath(resp.json, "message")
-    const detail =
-      typeof known === "string" && known.trim()
-        ? `${known.trim()} (HTTP ${resp.status})`
-        : `HTTP ${resp.status}，服务器返回：${resp.text.trim().slice(0, 300) || "（空）"}`
-    throw new Error(`换 token 失败：${detail}`)
+    const explained = explainAuthFailure(resp.json, resp.text)
+    if (explained) throw new Error(explained)
+    throw new Error(
+      `换 token 失败：HTTP ${resp.status}，服务器返回：${resp.text.trim().slice(0, 500) || "（空）"}`,
+    )
   }
   const rotated = getPath(resp.json, "refresh_token")
   return {

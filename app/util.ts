@@ -139,6 +139,36 @@ export function looksLikeHtml(text: string): boolean {
   return head.startsWith("<!doctype html") || head.startsWith("<html") || head.startsWith("<")
 }
 
+/**
+ * 把「refresh token 被作废」这类回复翻译成能照着做的话。
+ *
+ * 服务器原话是 "Your refresh token has been invalidated. Please try signing in again."
+ * ——它没说**为什么**被作废，而原因几乎总是同一个：这个 refresh token 被两个客户端
+ * 共用了。OAuth 的 refresh token 每次使用都会轮换并作废旧的；旧的再被用一次，
+ * 会被判定为重放（可能是被盗），于是整个 token 家族一起撤销，两边都登出。
+ */
+export function explainAuthFailure(json: unknown, text: string): string | undefined {
+  const code = getPath(json, "error.code") ?? getPath(json, "error")
+  const message = getPath(json, "error.message") ?? getPath(json, "error_description")
+  const codeStr = typeof code === "string" ? code : ""
+  const msgStr = typeof message === "string" ? message : ""
+
+  if (codeStr === "refresh_token_invalidated" || /invalidated/i.test(msgStr)) {
+    return (
+      "refresh token 已被作废。最常见的原因是它同时被两个地方用了——" +
+      "电脑上的 CLI 和这个 App 各续各的，OAuth 会把旧 token 的再次使用判定为重放，" +
+      "然后撤销整个 token 家族。\n\n" +
+      "怎么办：在电脑上重新登录一次；然后**只填 access token，别填 refresh token**，" +
+      "这样两边就不会再抢同一个家族。代价是几小时后要回电脑重取一次。"
+    )
+  }
+  if (codeStr === "invalid_grant" || /not found or invalid/i.test(msgStr)) {
+    return "refresh token 无效或已过期。在电脑上重新登录一次再取。"
+  }
+  if (msgStr) return msgStr
+  return text.trim() ? undefined : undefined
+}
+
 /** 复制到剪贴板。Pasteboard 是现行 API，Clipboard 是废弃的旧名，都试一下。 */
 export function copyToClipboard(text: string): boolean {
   try {

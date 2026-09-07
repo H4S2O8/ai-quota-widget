@@ -18,7 +18,15 @@
  * 第 3 条是关键：宁可红着报错，也不要绿着显示一个假的 0%。
  */
 import type { Metric, Provider, ProviderResult } from "./types"
-import { describeHttpError, getPath, num, requestJson, toEpochMs, windowLabel } from "./util"
+import {
+  describeHttpError,
+  explainAuthFailure,
+  getPath,
+  num,
+  requestJson,
+  toEpochMs,
+  windowLabel,
+} from "./util"
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 const TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"
@@ -69,26 +77,27 @@ export const anthropicProvider: Provider = {
   icon: "sparkle",
   color: "#D97757",
   help:
-    "只填 refresh token 就够了——access token 会用它换出来。" +
-    "跑 dev/get_claude_token.sh --refresh 取它。凭据来自 Claude Code，不是 API Key。",
+    "凭据来自 Claude Code，不是 API Key。⚠️ refresh token 和电脑上的 Claude Code " +
+    "共用同一个 token 家族，两边都续期会互相作废，严重时一起登出——" +
+    "经常用 Claude Code 的话建议只填 access token（几小时重取一次）。",
   fields: [
     {
-      key: "refreshToken",
-      label: "Refresh Token",
-      secret: true,
-      required: true,
-      help:
-        "凭据文件里的 refreshToken。这是长期有效的那个，填它就行。" +
-        "取法：./dev/get_claude_token.sh --refresh",
-    },
-    {
       key: "token",
-      label: "Access Token（可留空）",
+      label: "Access Token",
       secret: true,
       placeholder: "sk-ant-oat01-...",
       help:
-        "留空即可——它只有几个小时寿命，会用上面那个自动换出来并存回这里。" +
-        "只有在你没有 refresh token、只能临时用一下的时候才需要手填。",
+        "凭据文件里的 accessToken。只填这个最安全——不碰 token 家族，" +
+        "不会影响电脑上的 Claude Code。代价是几小时后要回电脑重取一次。",
+    },
+    {
+      key: "refreshToken",
+      label: "Refresh Token（可选，有代价）",
+      secret: true,
+      help:
+        "填了能自动续期，但**和电脑上的 Claude Code 共用同一个 token 家族**。" +
+        "refresh token 每次使用都会轮换并作废旧的，两边各续各的就会互相踢掉，" +
+        "严重时整个家族被撤销、两边一起登出。经常用 Claude Code 的话别填。",
     },
   ],
   async fetch(config, ctx): Promise<ProviderResult> {
@@ -96,7 +105,7 @@ export const anthropicProvider: Provider = {
     const refreshToken = config.refreshToken?.trim() ?? ""
 
     if (!token && !refreshToken) {
-      throw new Error("至少要填 refresh token。access token 会用它换出来。")
+      throw new Error("至少要填 access token（或 refresh token）。")
     }
 
     // 没有 access token 就直接去换，不发那个注定 401 的请求。
@@ -209,7 +218,8 @@ async function refreshTokens(
   )
   const next = getPath(resp.json, "access_token")
   if (!resp.ok || typeof next !== "string" || !next) {
-    throw new Error(`换 token 失败：${refreshFailureDetail(resp)}`)
+    const explained = explainAuthFailure(resp.json, resp.text)
+    throw new Error(explained ?? `换 token 失败：${refreshFailureDetail(resp)}`)
   }
   const rotated = getPath(resp.json, "refresh_token")
   return {
