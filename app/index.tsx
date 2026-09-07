@@ -47,7 +47,7 @@ import type { WidgetDiag } from "./store"
 import type { Account, AppConfig, Snapshot } from "./types"
 import { EMPTY_SNAPSHOT } from "./types"
 import { Card, ProgressBar, SectionTitle, StatusPill } from "./ui"
-import { fmtAgo, fmtClock } from "./util"
+import { copyToClipboard, fmtAgo, fmtClock } from "./util"
 import { buildRows, summarize } from "./view"
 import type { AccountRow, MetricRow } from "./view"
 
@@ -147,9 +147,22 @@ function AccountCard({
       ))}
 
       {row.error ? (
-        <Text font={11} foregroundStyle={STATUS_COLOR.bad}>
-          {row.error}
-        </Text>
+        <HStack spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+          <Text font={11} foregroundStyle={STATUS_COLOR.bad}>
+            {row.error}
+          </Text>
+          <Spacer />
+          <Button
+            title="复制"
+            systemImage="doc.on.doc"
+            controlSize="small"
+            action={() =>
+              copyToClipboard(
+                [`${row.account.label}（${row.providerName}）`, row.error ?? "", "", row.raw ?? ""].join("\n"),
+              )
+            }
+          />
+        </HStack>
       ) : null}
       {row.note ? (
         <Text font={11} foregroundStyle="secondaryLabel">
@@ -405,7 +418,17 @@ function DiagnosticsPage({ snapshot, rows }: { snapshot: Snapshot; rows: Account
           .filter((row) => row.raw)
           .map((row) => (
             <Card key={row.account.id}>
-              <SectionTitle text={`原始响应 · ${row.account.label}`} />
+              <SectionTitle
+                text={`原始响应 · ${row.account.label}`}
+                trailing={
+                  <Button
+                    title="复制"
+                    systemImage="doc.on.doc"
+                    controlSize="small"
+                    action={() => copyToClipboard(row.raw ?? "")}
+                  />
+                }
+              />
               <Text font={10} fontDesign="monospaced" foregroundStyle="secondaryLabel">
                 {row.raw ?? ""}
               </Text>

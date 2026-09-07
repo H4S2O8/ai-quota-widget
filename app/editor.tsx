@@ -29,8 +29,18 @@ import { providerOrPlaceholder } from "./providers"
 import type { Account, Provider, ProviderResult } from "./types"
 import { ACCENT, STATUS_COLOR } from "./theme"
 import { Card, FieldLabel, SectionTitle, Well } from "./ui"
-import { errorMessage, fmtMetricDetail, fmtMetricValue, newId, statusOf } from "./util"
+import {
+  copyToClipboard,
+  errorMessage,
+  fmtMetricDetail,
+  fmtMetricValue,
+  newId,
+  statusOf,
+} from "./util"
 // 试抓预览用默认口径（剩余）——这一页是验接口通不通，不跟随面板设置
+
+/** 原始响应保留多少字符。够看完一个 Cloudflare 验证页的头部。 */
+const RAW_KEEP = 20000
 
 export function AccountEditor({
   initial,
@@ -65,6 +75,7 @@ export function AccountEditor({
   const [preview, setPreview]: [ProviderResult | null, (v: ProviderResult | null) => void] =
     useState(null as ProviderResult | null)
   const [raw, setRaw] = useState("")
+  const [copied, setCopied] = useState("")
 
   /** 一处改，一处存。所有输入都经过它。 */
   function patch(next: Partial<Account>) {
@@ -123,7 +134,9 @@ export function AccountEditor({
     } finally {
       // 成功也要留原文：字段解析对不对，只有对着原文才看得出来。
       if (captured) {
-        setRaw(captured.length > 4000 ? `${captured.slice(0, 4000)}\n…（已截断）` : captured)
+        // 留得比之前宽得多：截断过的原始响应经常正好把关键那段切掉，
+        // 而这一页存在的全部意义就是让人看到接口到底返回了什么。
+        setRaw(captured.length > RAW_KEEP ? `${captured.slice(0, RAW_KEEP)}\n…（已截断）` : captured)
       }
       if (rateLimitedFor !== undefined) {
         // 直接拼字符串，不用 setState 的函数式更新 —— 那个写法在这个平台上
@@ -236,10 +249,30 @@ export function AccountEditor({
         </Card>
 
         <Card>
-          <SectionTitle text="试抓一次" />
+          <SectionTitle
+            text="试抓一次"
+            trailing={
+              <Button
+                title="复制"
+                systemImage="doc.on.doc"
+                controlSize="small"
+                action={() => {
+                  const ok = copyToClipboard(
+                    [`账户：${account.label}（${provider.name}）`, "", status, "", raw].join("\n"),
+                  )
+                  setCopied(ok ? "已复制状态与原始响应" : "复制失败")
+                }}
+              />
+            }
+          />
           <Text font={11} foregroundStyle="secondaryLabel">
             {status}
           </Text>
+          {copied ? (
+            <Text font={10} foregroundStyle="tertiaryLabel">
+              {copied}
+            </Text>
+          ) : null}
           <HStack spacing={10}>
             <Button
               title={busy ? "请求中…" : "现在抓取"}
@@ -280,7 +313,20 @@ export function AccountEditor({
 
         {raw ? (
           <Card>
-            <SectionTitle text="原始响应" />
+            <SectionTitle
+              text="原始响应"
+              trailing={
+                <Button
+                  title="复制"
+                  systemImage="doc.on.doc"
+                  controlSize="small"
+                  action={() => setCopied(copyToClipboard(raw) ? "已复制原始响应" : "复制失败")}
+                />
+              }
+            />
+            <Text font={10} foregroundStyle="tertiaryLabel">
+              {raw.length} 字符{raw.length >= RAW_KEEP ? "（已截断）" : ""}
+            </Text>
             <Text font={10} fontDesign="monospaced" foregroundStyle="secondaryLabel">
               {raw}
             </Text>

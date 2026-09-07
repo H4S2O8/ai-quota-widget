@@ -127,6 +127,37 @@ function parseRetryAfter(headers: unknown): number | undefined {
   }
 }
 
+/**
+ * 响应体看起来是不是 HTML。
+ *
+ * 一个返回 JSON 的接口忽然回 HTML，几乎总是同一件事：中间有东西把请求截胡了——
+ * Cloudflare 的验证页、登录跳转、或者网络里的门户。这种情况下报「HTTP 200」
+ * 是最误导人的说法，因为状态码确实是 200，问题在内容。
+ */
+export function looksLikeHtml(text: string): boolean {
+  const head = text.slice(0, 400).trim().toLowerCase()
+  return head.startsWith("<!doctype html") || head.startsWith("<html") || head.startsWith("<")
+}
+
+/** 复制到剪贴板。Pasteboard 是现行 API，Clipboard 是废弃的旧名，都试一下。 */
+export function copyToClipboard(text: string): boolean {
+  try {
+    const pb = (globalThis as any).Pasteboard
+    if (pb?.setString) {
+      pb.setString(text)
+      return true
+    }
+    const cb = (globalThis as any).Clipboard
+    if (cb?.copyText) {
+      cb.copyText(text)
+      return true
+    }
+  } catch {
+    // 落到下面返回 false
+  }
+  return false
+}
+
 /** 把 HTTP 失败翻译成一句能看懂的话 */
 export function describeHttpError(resp: JsonResponse, fallback = "请求失败"): string {
   const msg =

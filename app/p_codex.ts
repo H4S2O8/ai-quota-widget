@@ -35,7 +35,15 @@
  * 拿不到就只显示百分比，不编一个假的倒计时出来。
  */
 import type { Metric, Provider, ProviderResult } from "./types"
-import { describeHttpError, getPath, num, requestJson, toEpochMs, windowLabel } from "./util"
+import {
+  describeHttpError,
+  getPath,
+  looksLikeHtml,
+  num,
+  requestJson,
+  toEpochMs,
+  windowLabel,
+} from "./util"
 
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 const TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -92,7 +100,7 @@ export const codexProvider: Provider = {
         throw new Error("上一次换 token 失败，正在退避中（半小时内不再重试）。")
       }
       try {
-        const first = await refreshAccessToken(refreshToken, ctx.timeoutSec)
+        const first = await refreshAccessToken(refreshToken, ctx.timeoutSec, ctx.captureRaw)
         token = first.accessToken
         ctx.updateConfig({ accessToken: first.accessToken, refreshToken: first.refreshToken })
       } catch (error) {
@@ -119,7 +127,7 @@ export const codexProvider: Provider = {
       }
       let refreshed
       try {
-        refreshed = await refreshAccessToken(refreshToken, ctx.timeoutSec)
+        refreshed = await refreshAccessToken(refreshToken, ctx.timeoutSec, ctx.captureRaw)
       } catch (error) {
         ctx.onTokenRefreshFailed()
         throw error
@@ -178,6 +186,7 @@ function getUsage(token: string, accountId: string, timeoutSec: number) {
 async function refreshAccessToken(
   refreshToken: string,
   timeoutSec: number,
+  captureRaw?: (text: string) => void,
 ): Promise<{ accessToken: string; refreshToken: string }> {
   const body =
     `grant_type=refresh_token` +
@@ -186,9 +195,34 @@ async function refreshAccessToken(
 
   const resp = await requestJson(
     TOKEN_URL,
-    { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body },
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        // 参考实现（kimi-code-usage 的 codex.py）打这个端点用的是 cloudscraper，
+        // 说明它挂着 Cloudflare。带上浏览器味道的头是我们能做的最低成本尝试；
+        // 挡不住的话下面会明确报出来，而不是含糊地说「HTTP 200」。
+        Accept: "application/json",
+        "User-Agent":
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 " +
+          "(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      body,
+    },
     timeoutSec,
   )
+  // 换 token 的响应也留给诊断页 —— 这一步失败时，原文是唯一能定位的东西
+  captureRaw?.(resp.text)
+
+  if (looksLikeHtml(resp.text)) {
+    throw new Error(
+      `换 token 时收到的是网页而不是 JSON（HTTP ${resp.status}）。` +
+        "这几乎肯定是 Cloudflare 的验证页——它需要浏览器环境，手机上的 fetch 过不去。" +
+        "解决办法：在电脑上重新取一次 access_token 填进来（那个能直接用），" +
+        "或者等一段时间换个网络再试。完整响应见下面的「原始响应」，可以复制。",
+    )
+  }
   const next = getPath(resp.json, "access_token")
   if (!resp.ok || typeof next !== "string" || !next) {
     // 这里之前只说「刷新被拒 (200)」——状态码 200 配「被拒」，而且没说服务器

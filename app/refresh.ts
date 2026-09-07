@@ -14,8 +14,14 @@ import { providerOrPlaceholder } from "./providers"
 import type { Account, AccountState, AppConfig, Snapshot } from "./types"
 import { errorMessage } from "./util"
 
-/** 原始响应留多少字符。够看清结构，又不至于把快照撑大。 */
-const RAW_LIMIT = 4000
+/**
+ * 原始响应留多少字符。
+ *
+ * 从 4000 放宽到 20000：截断过的原始响应经常正好把关键那段切掉。
+ * 比如 Cloudflare 的验证页，开头几千字符全是样式和脚本，真正说明问题的
+ * 那句话在后面。快照大一点是可以接受的代价。
+ */
+const RAW_LIMIT = 20000
 /** 换 token 失败后，多久之内不再尝试。见 AccountState.refreshBlockedUntil。 */
 const REFRESH_BACKOFF_MS = 30 * 60 * 1000
 /** 服务器没给 retry-after 时，被限流后默认停多久。 */
