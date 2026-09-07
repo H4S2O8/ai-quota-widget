@@ -24,7 +24,8 @@
 
    自己改过代码就跑 `dev/pack.sh` 重新打包。
 
-2. **自动更新**：`remoteResource` 指向仓库里的 `AI-Quota.zip`（raw 直链，不跳转）。
+2. **自动更新**：`remoteResource` 指向 jsDelivr 上的 `AI-Quota.zip`（GitHub 的公共 CDN 镜像）。
+   不用 `raw.githubusercontent.com`——国内网络下它时通时不通，表现是「远程 not found」。
    Scripting 按 `script.json` 的 `version` 判断要不要更新，所以版本号加一才会推送。
 
    **别填 GitHub 的 `tree/...` 网页地址**——那个返回 270KB 的 HTML，不是 zip，

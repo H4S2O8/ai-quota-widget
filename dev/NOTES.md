@@ -89,7 +89,31 @@ app_intents.tsx  小组件上的刷新按钮
 `utilization` 是 `0.42` 还是 `42` 也不确定，所以 `<= 1` 一律当小数。代价是真有 1%
 的时候会显示成 1%（而不是 100%）——这个方向的错比反过来安全。
 
-## remoteResource 不能填 GitHub 的 tree 网页
+## 自动更新的地址换过三次，记录一下都为什么不行
+
+| 地址 | 结果 |
+| --- | --- |
+| `github.com/<u>/<r>/tree/main/app` | 返回 270KB HTML，不是 zip 也不是 git 仓库。手机一直停在初始版本且不报错 |
+| `github.com/<u>/<r>/releases/latest/download/x.zip` | 是 302 跳转；且发布后几分钟内附件 CDN 仍返回上一版 |
+| `raw.githubusercontent.com/<u>/<r>/main/x.zip` | **在国内网络下不稳定**：同一分钟内一次 200、一次直接连不上（curl 000）。App 侧表现为「远程 not found」 |
+| `cdn.jsdelivr.net/gh/<u>/<r>@main/x.zip` | **在用**。GitHub 的公共 CDN 镜像，同样的字节，可达性好得多 |
+
+jsDelivr 的 `@main` 有缓存（约 12 小时），所以 `dev/release.sh` 每次发布会调一次
+`purge.jsdelivr.net` 并验证拿到的是新版本。
+
+## 发布必须走 dev/release.sh
+
+踩过一次：`gh release create ... --notes-file - <<'NOTES'` 这种写法，**heredoc 会把
+后面的附件参数吃掉**，连着两个版本的 release 是空的——安装链直接 404，而且
+GitHub 不会报错，release 页面看起来一切正常。
+
+`dev/release.sh` 把整条链串起来并逐条验证：tag 与 `script.json` 的 version 必须一致、
+测试通过、包自洽、附件确实上传了、三条对外链接都能拿到新版本号。
+
+一般化的教训：**发布是一条有很多步的流水线，任何一步漏掉都不会当场报错。**
+凡是「漏了不报错」的动作，就该有脚本替你验一遍。
+
+## 旧记录：remoteResource 不能填 GitHub 的 tree 网页
 
 第一版填的是 `https://github.com/<user>/<repo>/tree/main/app`（skill 模板里的写法）。
 **不工作**，手机上一直停在最初装的那个版本，而且不报错。
