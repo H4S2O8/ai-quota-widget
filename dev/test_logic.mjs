@@ -339,6 +339,18 @@ eq("方块条 50%", TM.blockBar(0.5, 8), "████░░░░")
 eq("极小值也画一格", TM.blockBar(0.004, 8), "█░░░░░░░")
 eq("越界值被夹住", TM.blockBar(2, 8), "████████")
 
+console.log("\n== 指标短标签（等宽排版用）==")
+eq("5 小时 -> 5h", V.shortLabel("5 小时"), "5h")
+eq("7 天 -> 7d", V.shortLabel("7 天"), "7d")
+eq("7 天 Opus -> opus", V.shortLabel("7 天 Opus"), "opus")
+eq("余额 -> bal", V.shortLabel("余额"), "bal")
+eq("总余额 -> bal", V.shortLabel("总余额"), "bal")
+eq("剩余额度 -> quota", V.shortLabel("剩余额度"), "quota")
+// 认不出来的：能取到 ASCII 就用 ASCII，别把中文截一半
+eq("未知的 ASCII 名", V.shortLabel("Balance"), "balan")
+check("短标签全是窄字符", ["5 小时","7 天","7 天 Opus","余额","剩余额度"]
+  .every((l) => TM.displayWidth(V.shortLabel(l)) === V.shortLabel(l).length))
+
 console.log("\n== 增长式与扣除式统一 ==")
 // 同一屏里，Claude 的「已用 42%」和 DeepSeek 的「余额 ¥12.5」要读出同一个方向
 const grow = { id: "g", label: "5 小时", kind: "percent", value: 42 }

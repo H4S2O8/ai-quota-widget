@@ -55,10 +55,20 @@ const isAccessory = family.startsWith("accessory")
 const isSmall = family === "systemSmall" || family === "small"
 const isLarge = family === "systemLarge" || family === "large"
 
-/** 每种尺寸的列宽预算。等宽字体下这些数字直接决定了会不会换行。 */
+/**
+ * 每种尺寸的列宽和行数预算。
+ *
+ * 算法不是拍脑袋：中尺寸宽 364pt，减去左右各 15pt 的内边距还剩 334pt；
+ * SF Mono 11pt 的字符步进约 6.6pt，所以一行放得下约 50 列。
+ * 行高约 11 × 1.64 ≈ 18pt，中尺寸高 170pt 减上下内边距剩 144pt，约 8 行
+ * （1 行提示符 + 6 行内容 + 1 行状态）。大尺寸 382pt 同理约 19 行。
+ *
+ * 第一版给得太保守（name 10 / win 4 / rows 5），效果图里中尺寸只放得下
+ * **一个**账户，中文标签还被截成「5 …」。用实现代码生成效果图才看出来。
+ */
 const LAYOUT = isLarge
-  ? { font: 11, name: 11, win: 5, bar: 9, val: 7, rows: 13 }
-  : { font: 11, name: 10, win: 4, bar: 7, val: 6, rows: 5 }
+  ? { font: 11, name: 13, win: 5, bar: 12, val: 8, rows: 17 }
+  : { font: 11, name: 13, win: 5, bar: 10, val: 8, rows: 6 }
 
 // ---------- 一行由若干带色片段拼成 ----------
 
@@ -98,7 +108,7 @@ function metricSegs(m: MetricRow, last: boolean, indent: boolean): Seg[] {
   const color = statusColor(P, m.status)
   return [
     { t: indent ? (last ? " └ " : " ├ ") : "", c: P.rule },
-    { t: padEnd(m.metric.label, LAYOUT.win), c: P.dim },
+    { t: padEnd(m.short, LAYOUT.win), c: P.dim },
     { t: " ", c: P.dim },
     { t: blockBar(m.used ?? 0, LAYOUT.bar), c: color },
     { t: padStart(m.primary, LAYOUT.val + 1), c: P.fg },
@@ -184,7 +194,7 @@ function SmallView({ rows }: ViewProps) {
         lineLimit={1}
       />
       <Line
-        segs={[{ t: `${row.account.label}${m ? " " + m.metric.label : ""}`, c: P.dim }]}
+        segs={[{ t: `${row.account.label}${m ? " " + m.short : ""}`, c: P.dim }]}
         size={10}
       />
       {m?.used !== undefined ? (
@@ -269,7 +279,7 @@ function AccessoryView({ rows }: ViewProps) {
     <VStack spacing={1} alignment="leading">
       <Text font="caption2" widgetAccentable lineLimit={1}>
         {row.account.label}
-        {m ? ` ${m.metric.label}` : ""}
+        {m ? ` ${m.short}` : ""}
       </Text>
       <Text font="headline" lineLimit={1}>
         {!row.ok && row.error ? "fail" : (m?.primary ?? "—")}

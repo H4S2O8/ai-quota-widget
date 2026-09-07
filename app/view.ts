@@ -21,6 +21,14 @@ export interface MetricRow {
   used?: number
   norm: NormalizedMetric
   /**
+   * 给等宽排版用的短标签。
+   *
+   * 主 App 里「5 小时」「7 天 Opus」是对的，但小组件是等宽终端排版，
+   * 中文标签占双宽、长度又不齐，会把整列撞散。效果图里 `5 …` `7 天…` `总余…`
+   * 就是这么来的——而那是用真实代码生成的图，手写样张用短标签反而掩盖了问题。
+   */
+  short: string
+  /**
    * 渲染用的成品文本，在这里算一次。
    *
    * 主 App 和小组件都只读这两个字段，不各自调格式化函数——两边的口径就不可能
@@ -50,6 +58,38 @@ export interface AccountRow {
   severity: number
 }
 
+/**
+ * 中文指标名 -> 等宽排版用的短标签。
+ *
+ * 认不出来的按「取前几个 ASCII 字符或首字」处理，不硬截中文——
+ * 截一半的中文比缩写更难认。
+ */
+export function shortLabel(label: string): string {
+  const table: Record<string, string> = {
+    "5 小时": "5h",
+    "7 天": "7d",
+    "7 天 Opus": "opus",
+    "7 天 Sonnet": "sonn",
+    "7 天 · 第三方应用": "apps",
+    "每月": "1mo",
+    "余额": "bal",
+    "总余额": "bal",
+    "可用余额": "bal",
+    "账户余额": "bal",
+    "剩余额度": "quota",
+    "已消费": "spent",
+    "本 Key 限额": "key",
+    "周额度": "7d",
+    "额度": "quota",
+  }
+  const hit = table[label.trim()]
+  if (hit) return hit
+  // 纯 ASCII 的（比如 provider 自己给的 "5 小时" 之外的名字）直接用，最多 5 列
+  const ascii = label.replace(/[^\x20-\x7E]/g, "").trim()
+  if (ascii.length >= 2) return ascii.slice(0, 5).toLowerCase()
+  return label.slice(0, 2)
+}
+
 export function buildRows(
   config: AppConfig,
   snapshot: Snapshot,
@@ -68,6 +108,7 @@ export function buildRows(
         norm,
         primary: fmtMetricValue(metric, mode),
         detail: fmtMetricDetail(metric, now, mode),
+        short: shortLabel(metric.label),
       }
     })
 
