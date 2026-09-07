@@ -51,6 +51,8 @@ export interface JsonResponse {
   ok: boolean
   json: unknown
   text: string
+  /** 服务器要求的等待秒数（429 时的 retry-after 头）。没有就是 undefined。 */
+  retryAfterSec?: number
 }
 
 /**
@@ -89,10 +91,37 @@ export async function requestJson(
     } catch {
       json = undefined
     }
-    return { status: response.status, ok: response.ok, json, text }
+    return {
+      status: response.status,
+      ok: response.ok,
+      json,
+      text,
+      retryAfterSec: parseRetryAfter(response.headers),
+    }
   } finally {
     // 成功也要清，否则定时器一直挂到超时才释放
     clearTimeout(timer)
+  }
+}
+
+/**
+ * 读 `retry-after` 头。
+ *
+ * 429 的时候服务器会明确告诉你等多久（实测 Anthropic 给的是将近一小时）。
+ * 不读它就只能瞎猜，而猜短了会把限流窗口顶得更长。
+ */
+function parseRetryAfter(headers: unknown): number | undefined {
+  try {
+    const raw = (headers as { get?: (n: string) => string | null } | undefined)?.get?.("retry-after")
+    if (!raw) return undefined
+    const seconds = Number(raw)
+    if (Number.isFinite(seconds) && seconds > 0) return seconds
+    // 也可能是 HTTP 日期格式
+    const at = Date.parse(raw)
+    if (Number.isFinite(at)) return Math.max(0, Math.round((at - Date.now()) / 1000))
+    return undefined
+  } catch {
+    return undefined
   }
 }
 

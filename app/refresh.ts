@@ -18,6 +18,8 @@ import { errorMessage } from "./util"
 const RAW_LIMIT = 4000
 /** 换 token 失败后，多久之内不再尝试。见 AccountState.refreshBlockedUntil。 */
 const REFRESH_BACKOFF_MS = 30 * 60 * 1000
+/** 服务器没给 retry-after 时，被限流后默认停多久。 */
+const DEFAULT_RATE_LIMIT_MS = 15 * 60 * 1000
 const MAX_CONCURRENT = 4
 
 export interface RefreshOutcome {
@@ -71,6 +73,22 @@ async function fetchOne(
   let patch: Record<string, string> | undefined
   let raw: string | undefined
   let refreshFailed = false
+  let rateLimitedFor: number | undefined
+
+  // 被限流期间**整个账户都不请求**。429 是服务器明确要求你停下来；
+  // 继续打不但没用，还可能把限流窗口顶得更长，甚至影响同一账号在别处的正常使用。
+  const retryAfter = previous?.retryAfter
+  if (retryAfter !== undefined && retryAfter > Date.now()) {
+    const mins = Math.max(1, Math.ceil((retryAfter - Date.now()) / 60000))
+    return {
+      state: {
+        ...(previous as AccountState),
+        ok: false,
+        error: `被服务器限流，${mins} 分钟后自动重试（期间不再发请求）`,
+        errorAt: Date.now(),
+      },
+    }
+  }
 
   const blockedUntil = previous?.refreshBlockedUntil
   const allowTokenRefresh = !(blockedUntil !== undefined && blockedUntil > Date.now())
@@ -88,6 +106,12 @@ async function fetchOne(
       onTokenRefreshFailed: () => {
         refreshFailed = true
       },
+      onRateLimited: (seconds) => {
+        rateLimitedFor =
+          seconds !== undefined && Number.isFinite(seconds) && seconds > 0
+            ? seconds * 1000
+            : DEFAULT_RATE_LIMIT_MS
+      },
     })
     return {
       state: {
@@ -98,8 +122,9 @@ async function fetchOne(
         // 成功后清掉错误，但保留它发生的时间没有意义，一并清掉
         error: undefined,
         errorAt: undefined,
-        // 成功了就解除退避
+        // 成功了就解除两种退避
         refreshBlockedUntil: undefined,
+        retryAfter: undefined,
       },
       patch,
     }
@@ -116,6 +141,7 @@ async function fetchOne(
         refreshBlockedUntil: refreshFailed
           ? Date.now() + REFRESH_BACKOFF_MS
           : blockedUntil,
+        retryAfter: rateLimitedFor !== undefined ? Date.now() + rateLimitedFor : previous?.retryAfter,
       },
       patch,
     }

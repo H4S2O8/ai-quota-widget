@@ -142,6 +142,16 @@ export const codexProvider: Provider = {
     if (!resp.ok && resp.json === undefined && resp.text.startsWith("<")) {
       throw new Error(`被 Cloudflare 拦了 (${resp.status})，这条路径在手机上走不通`)
     }
+    if (resp.status === 429) {
+      // 服务器明确要求停下来。上报之后，调用方会在这段时间内完全不碰这个账户。
+      ctx.onRateLimited(resp.retryAfterSec)
+      const mins = resp.retryAfterSec ? Math.ceil(resp.retryAfterSec / 60) : undefined
+      throw new Error(
+        `被限流 (429)${mins ? `，服务器要求等 ${mins} 分钟` : ""}。` +
+          "这个端点对鉴权失败的容忍度很低——连续几次失败就会锁一段时间，" +
+          "期间本来能成功的请求也会一起挡掉。已经暂停对这个账户的请求。",
+      )
+    }
     if (!resp.ok) throw new Error(describeHttpError(resp, "读取用量失败"))
 
     const metrics = parseUsage(resp.json)

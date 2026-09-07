@@ -223,7 +223,7 @@ const ccBase = `http://127.0.0.1:${ccServer.address().port}`
 const ccStart = Date.now()
 const ccResult = await C.commandcodeProvider.fetch(
   { apiKey: "k", baseUrl: ccBase },
-  { timeoutSec: 8, updateConfig: () => {}, captureRaw: () => {}, allowTokenRefresh: true, onTokenRefreshFailed: () => {} },
+  { timeoutSec: 8, updateConfig: () => {}, captureRaw: () => {}, allowTokenRefresh: true, onTokenRefreshFailed: () => {}, onRateLimited: () => {} },
 )
 const ccElapsed = Date.now() - ccStart
 check("whoami 吊死也拿到了额度", ccResult.metrics.length === 2)
@@ -233,7 +233,7 @@ check(`没有等满主超时（实际 ${Math.round(ccElapsed / 1000)}s，whoami 
 const ccStart2 = Date.now()
 const ccResult2 = await C.commandcodeProvider.fetch(
   { apiKey: "k", baseUrl: ccBase, orgId: "org_1" },
-  { timeoutSec: 8, updateConfig: () => {}, captureRaw: () => {}, allowTokenRefresh: true, onTokenRefreshFailed: () => {} },
+  { timeoutSec: 8, updateConfig: () => {}, captureRaw: () => {}, allowTokenRefresh: true, onTokenRefreshFailed: () => {}, onRateLimited: () => {} },
 )
 check("填了 orgId 就跳过 whoami", Date.now() - ccStart2 < 1000 && ccResult2.metrics.length === 2)
 ccServer.close()
@@ -451,6 +451,40 @@ eq("过期判断：从未更新算过期", R.isStale({ updatedAt: 0, states: {} 
   const out = await R.refreshAccounts(cfg, prev)
   check("抓成功后清掉退避标记", out.snapshot.states.g.refreshBlockedUntil === undefined)
   check("抓成功后清掉旧错误", out.snapshot.states.g.error === undefined)
+}
+
+// 被限流期间必须一个请求都不发。这条是 2026-09-07 那次事故的回归测试：
+// 用假 token 连打鉴权端点，第 4 次就 429，retry-after 将近一小时；
+// 限流期间继续打不但没用，还会波及同一账号在别处的正常使用。
+{
+  let hits = 0
+  const counting = createServer((req, res) => {
+    hits++
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ data: { balance: 1 } }))
+  })
+  await new Promise((r) => counting.listen(0, "127.0.0.1", r))
+  const cbase = `http://127.0.0.1:${counting.address().port}`
+  const cfg = {
+    ...liveConfig,
+    accounts: [{ id: "rl", providerId: "generic", label: "rl", enabled: true,
+      config: { url: `${cbase}/ok`, valuePath: "data.balance" } }],
+  }
+  const blocked = {
+    updatedAt: 0,
+    states: { rl: { ok: false, fetchedAt: 123, error: "429", retryAfter: Date.now() + 600000,
+                    result: { metrics: [{ id: "m", label: "m", kind: "amount", value: 7 }] } } },
+  }
+  const out = await R.refreshAccounts(cfg, blocked)
+  eq("限流期间一个请求都没发", hits, 0)
+  check("限流期间仍显示上次的数值", out.snapshot.states.rl.result.metrics[0].value === 7)
+  check("错误信息说明还要等多久", /分钟后自动重试/.test(out.snapshot.states.rl.error))
+  // 限流到期后应当恢复
+  const expired = { updatedAt: 0, states: { rl: { ok: false, fetchedAt: 0, retryAfter: Date.now() - 1000 } } }
+  const out2 = await R.refreshAccounts(cfg, expired)
+  eq("限流到期后恢复请求", hits, 1)
+  check("恢复后清掉限流标记", out2.snapshot.states.rl.retryAfter === undefined)
+  counting.close()
 }
 
 server.close()

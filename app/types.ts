@@ -79,6 +79,15 @@ export interface FetchContext {
   allowTokenRefresh: boolean
   /** 换 token 失败时调一下，调用方会记下来并退避一段时间。 */
   onTokenRefreshFailed: () => void
+  /**
+   * 撞上 429 时调一下，把服务器给的 retry-after（秒）带上。
+   *
+   * **这条是必须尊重的。** 鉴权端点对失败请求的容忍度极低——实测
+   * `api.anthropic.com/api/oauth/usage` 连续 3 次鉴权失败之后第 4 次就 429，
+   * 而且 `retry-after` 给的是将近一小时。限流期间继续请求不但没用，还可能
+   * 把限流窗口顶得更长，甚至波及同一账号在别处的正常使用。
+   */
+  onRateLimited: (retryAfterSec?: number) => void
 }
 
 export interface Provider {
@@ -172,6 +181,13 @@ export interface AccountState {
    * 端点打成 429——它一旦限流，连正常的请求也会跟着失败，症状会变得完全看不懂。
    */
   refreshBlockedUntil?: number
+  /**
+   * 被限流后，在此时间之前完全不再请求这个账户。
+   *
+   * 和 refreshBlockedUntil 不同：那个只挡「换 token」，这个挡**整个账户的抓取**。
+   * 429 意味着服务器已经明确要求你停下来，继续打只会更糟。
+   */
+  retryAfter?: number
 }
 
 export interface Snapshot {
