@@ -211,6 +211,29 @@ present，时机上已经太晚，小组件拿不到内容。
 判，会把正确的 `main()` 收尾判成错误。现在按花括号深度判「同一层级」，
 `dev/test_check.sh` 里正反例都有。
 
+## OAuth access token 都是短命的，必须做刷新
+
+Claude 和 Codex 两个 provider 用的都是 OAuth **access token**，寿命只有几个小时。
+这是 OAuth 的设计，不是哪里做得不好：CLI 在电脑上是靠 refresh token 悄悄续的，
+所以你几乎察觉不到。**把 access token 复制到手机上，得到的是一个几小时后就死掉的快照。**
+
+参考实现（kimi-code-usage）没有这个问题，因为它每次都重读本机凭据文件——
+那台机器上的 CLI 一直在帮它续。手机上没有这个前提，只能自己续。
+
+两个 provider 现在都实现了「401 → 用 refresh token 换一对新的 → `ctx.updateConfig`
+存回配置 → 重试一次」。`ctx.updateConfig` 这个口子当初就是为这件事留的。
+
+端点与 client_id（都探过，伪造 refresh_token 返回 `invalid_grant` 而不是
+`invalid_client`，说明 client_id 这一半被接受）：
+
+| | 端点 | client_id |
+| --- | --- | --- |
+| Claude | `POST api.anthropic.com/v1/oauth/token`（JSON body） | `9d1c250a-e61b-44d9-88ed-5944d1962f5e` |
+| Codex | `POST auth.openai.com/oauth/token`（form body） | `app_EMoamEEZ73f0CkXaXp7hrann` |
+
+一般化的教训：**凡是从 CLI 里抠出来的凭据，先问它的寿命。** 短命的就必须
+把续期一起搬过来，否则用户会以为「这个功能坏了」，其实只是过期了。
+
 ## 小组件一片漆黑：排查手册
 
 真机上反复出现，每次原因都不同。已确认的：

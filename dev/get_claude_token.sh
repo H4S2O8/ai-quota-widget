@@ -11,41 +11,101 @@ extract() {
   grep -o 'sk-ant-oat[A-Za-z0-9_-]*' | head -1
 }
 
-TOKEN=""
+# 从凭据里同时抠出 access token 和 refresh token。
+#
+# access token 只有几个小时寿命，refresh token 才是长期的那个——两个都要，
+# 填进 App 之后才能自动续，不用每次过期都回来跑一遍这个脚本。
+extract_json() {
+  python3 -c '
+import json, re, sys
+raw = sys.stdin.read()
+acc = ref = None
+try:
+    data = json.loads(raw)
+    def walk(node):
+        global acc, ref
+        if isinstance(node, dict):
+            for k, v in node.items():
+                lk = k.lower()
+                if isinstance(v, str):
+                    if "refresh" in lk and "token" in lk and not ref:
+                        ref = v
+                    elif "access" in lk and "token" in lk and not acc:
+                        acc = v
+                else:
+                    walk(v)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+    walk(data)
+except Exception:
+    pass
+if not acc:
+    m = re.search(r"sk-ant-oat[A-Za-z0-9_-]*", raw)
+    acc = m.group(0) if m else None
+print(acc or "")
+print(ref or "")
+'
+}
 
-# 1) 钥匙串（Claude Code 在 macOS 上的默认存法）
+RAW=""
 for SERVICE in "Claude Code-credentials" "Claude Code" "claude-code"; do
-  [ -n "$TOKEN" ] && break
-  TOKEN=$(security find-generic-password -s "$SERVICE" -w 2>/dev/null | extract)
-  [ -n "$TOKEN" ] && SOURCE="钥匙串「$SERVICE」"
+  [ -n "$RAW" ] && break
+  RAW=$(security find-generic-password -s "$SERVICE" -w 2>/dev/null)
+  [ -n "$RAW" ] && SOURCE="钥匙串「$SERVICE」"
 done
-
-# 2) 凭据文件（Linux / 某些版本的 macOS）
-if [ -z "$TOKEN" ] && [ -f "$HOME/.claude/.credentials.json" ]; then
-  TOKEN=$(extract < "$HOME/.claude/.credentials.json")
-  [ -n "$TOKEN" ] && SOURCE="$HOME/.claude/.credentials.json"
+if [ -z "$RAW" ] && [ -f "$HOME/.claude/.credentials.json" ]; then
+  RAW=$(cat "$HOME/.claude/.credentials.json")
+  SOURCE="$HOME/.claude/.credentials.json"
 fi
 
-if [ -z "$TOKEN" ]; then
-  echo "没找到 token。手动确认一下这两处："
+if [ -z "$RAW" ]; then
+  echo "没找到凭据。手动确认一下这两处："
   echo "  1) 钥匙串访问.app 里搜 Claude，看那条目叫什么名字"
   echo "  2) cat ~/.claude/.credentials.json"
-  echo "找到之后要的是 sk-ant-oat 开头那一串（不是 sk-ant-api 开头的 API Key）。"
+  exit 1
+fi
+
+PARSED=$(printf %s "$RAW" | extract_json)
+TOKEN=$(printf %s "$PARSED" | sed -n '1p')
+REFRESH=$(printf %s "$PARSED" | sed -n '2p')
+
+if [ -z "$TOKEN" ]; then
+  echo "在 $SOURCE 里没找到 access token。"
   exit 1
 fi
 
 printf %s "$TOKEN" | pbcopy 2>/dev/null && COPIED="已复制到剪贴板" || COPIED="（没有 pbcopy，自己复制）"
 
-HEAD=$(printf %s "$TOKEN" | cut -c1-14)
-TAIL=$(printf %s "$TOKEN" | rev | cut -c1-6 | rev)
-LEN=$(printf %s "$TOKEN" | wc -c | tr -d ' ')
+mask() {
+  printf "%s…%s（共 %s 字符）" "$(printf %s "$1" | cut -c1-12)" "$(printf %s "$1" | rev | cut -c1-4 | rev)" "$(printf %s "$1" | wc -c | tr -d ' ')"
+}
 
 echo "来源：$SOURCE"
-echo "token：$HEAD…$TAIL（共 $LEN 字符）"
+echo "access  token：$(mask "$TOKEN")"
+if [ -n "$REFRESH" ]; then
+  echo "refresh token：$(mask "$REFRESH")"
+else
+  echo "refresh token：没找到（那就只能过期后手动重取）"
+fi
 echo "$COPIED"
 echo
-echo "接下来：iPhone 上打开「AI 额度」→ 添加账户 → Claude 订阅 → 长按粘贴到"
-echo "「OAuth Access Token」→ 点「现在抓取」。"
-echo
-echo "注意：这个 token 有有效期，过期后小组件会显示「凭据无效或已过期 (401)」，"
-echo "那时重跑一次这个脚本、重新粘一次即可。"
+echo "iPhone 上：AI 额度 → 添加账户 → Claude 订阅"
+echo "  Access Token   长按粘贴（已在剪贴板）"
+if [ -n "$REFRESH" ]; then
+  echo "  Refresh Token  再跑一次：./dev/get_claude_token.sh --refresh"
+  echo
+  echo "**两个都要填。** access token 只有几个小时寿命，这是 OAuth 的设计，"
+  echo "不是哪里做得不好；Claude Code 在电脑上是靠 refresh token 悄悄续的。"
+  echo "手机上填了 refresh token 才能同样自动续，否则每隔几小时就要回来一趟。"
+fi
+
+# --refresh：单独把 refresh token 放进剪贴板
+if [ "$1" = "--refresh" ]; then
+  if [ -z "$REFRESH" ]; then
+    echo
+    echo "凭据里没有 refresh token。"
+    exit 1
+  fi
+  printf %s "$REFRESH" | pbcopy 2>/dev/null && echo && echo "refresh token 已复制到剪贴板。"
+fi

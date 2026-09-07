@@ -18,7 +18,18 @@
  * 第 3 条是关键：宁可红着报错，也不要绿着显示一个假的 0%。
  */
 import type { Metric, Provider, ProviderResult } from "./types"
-import { describeHttpError, getPath, num, toEpochMs, windowLabel } from "./util"
+import { describeHttpError, getPath, num, requestJson, toEpochMs, windowLabel } from "./util"
+
+const USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+const TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"
+/**
+ * Claude Code 自己的 OAuth 客户端 id。公开值，不是密钥。
+ *
+ * 验证方式：拿它配一个伪造的 refresh_token 打 TOKEN_URL，返回的是
+ * `invalid_grant`（refresh token 无效）而不是 `invalid_client`——
+ * 说明 client_id 这一半是被接受的。
+ */
+const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
 /** 已知窗口键 -> 显示名。左边写了几种可能的拼法，命中一个就够。 */
 const WINDOWS: { keys: string[]; label: string }[] = [
@@ -58,51 +69,112 @@ export const anthropicProvider: Provider = {
   icon: "sparkle",
   color: "#D97757",
   help:
-    "需要 Claude Code 的 OAuth access token（sk-ant-oat...），不是 API Key。" +
-    "Mac 上在钥匙串里找 Claude Code 那一条，或读 ~/.claude/.credentials.json 的 accessToken。" +
-    "这是非公开接口，Anthropic 改了返回结构这里就会报「无法识别的结构」——那时到详情页看原始响应，改用「自定义 JSON 接口」顶上。",
+    "需要 Claude Code 的 OAuth token（sk-ant-oat...），不是 API Key。" +
+    "跑 dev/get_claude_token.sh 一次取全。**access token 只有几个小时的寿命**，" +
+    "所以 refresh token 也要填——填了就能自动续，不用每次过期都重取一遍。",
   fields: [
     {
       key: "token",
-      label: "OAuth Access Token",
+      label: "Access Token",
       secret: true,
       required: true,
       placeholder: "sk-ant-oat01-...",
-      help: "token 有有效期，过期后要重新取一次。",
+      help: "凭据文件里的 accessToken。它是短命的，见下。",
+    },
+    {
+      key: "refreshToken",
+      label: "Refresh Token",
+      secret: true,
+      help:
+        "凭据文件里的 refreshToken。填了之后 access token 过期会自动换新的。" +
+        "不填的话每隔几小时就要手动重取一次——这不是这里做得不好，" +
+        "OAuth 的 access token 本来就是设计成短命的。",
     },
   ],
   async fetch(config, ctx): Promise<ProviderResult> {
-    const token = config.token?.trim() ?? ""
-    const response = await fetch("https://api.anthropic.com/api/oauth/usage", {
+    let token = config.token?.trim() ?? ""
+    let resp = await getUsage(token, ctx.timeoutSec)
+
+    // access token 是短命的（几小时），过期就换一个再来一次。
+    // 只重试一次：第二次还 401 就是 refresh token 也失效了，得重新登录。
+    if (resp.status === 401) {
+      const refreshToken = config.refreshToken?.trim() ?? ""
+      if (!refreshToken) {
+        throw new Error(
+          "access token 已过期 (401)。它本来就只有几个小时的寿命——" +
+            "把 refresh token 也填上就能自动续，不用每次手动重取。",
+        )
+      }
+      const refreshed = await refreshTokens(refreshToken, ctx.timeoutSec)
+      token = refreshed.accessToken
+      ctx.updateConfig({ token: refreshed.accessToken, refreshToken: refreshed.refreshToken })
+      resp = await getUsage(token, ctx.timeoutSec)
+      if (resp.status === 401) {
+        throw new Error("换过 token 之后仍然 401，refresh token 也失效了，需要在电脑上重新登录 Claude Code。")
+      }
+    }
+
+    ctx.captureRaw(resp.text)
+    if (!resp.ok) throw new Error(describeHttpError(resp, "读取用量失败"))
+
+    const metrics = parseUsage(resp.json)
+    if (metrics.length === 0) {
+      throw new Error("接口返回了无法识别的结构，请在详情页查看原始响应")
+    }
+    return { metrics, plan: readPlan(resp.json) }
+  },
+}
+
+function getUsage(token: string, timeoutSec: number) {
+  return requestJson(
+    USAGE_URL,
+    {
       headers: {
         Authorization: `Bearer ${token}`,
         "anthropic-beta": "oauth-2025-04-20",
         "Content-Type": "application/json",
       },
-      timeout: ctx.timeoutSec,
-    })
-    const text = await response.text()
-    ctx.captureRaw(text)
+    },
+    timeoutSec,
+  )
+}
 
-    let json: unknown = undefined
-    try {
-      json = text ? JSON.parse(text) : undefined
-    } catch {
-      json = undefined
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        describeHttpError({ status: response.status, ok: false, json, text }, "读取用量失败"),
-      )
-    }
-
-    const metrics = parseUsage(json)
-    if (metrics.length === 0) {
-      throw new Error("接口返回了无法识别的结构，请在详情页查看原始响应")
-    }
-    return { metrics, plan: readPlan(json) }
-  },
+/**
+ * 用 refresh token 换一对新的。
+ *
+ * 端点和 client_id 都探过：伪造的 refresh_token 打过去返回 `invalid_grant`
+ * 而不是 `invalid_client`，说明这两样是对的。
+ */
+async function refreshTokens(
+  refreshToken: string,
+  timeoutSec: number,
+): Promise<{ accessToken: string; refreshToken: string }> {
+  const resp = await requestJson(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: CLIENT_ID,
+      }),
+    },
+    timeoutSec,
+  )
+  const next = getPath(resp.json, "access_token")
+  if (!resp.ok || typeof next !== "string" || !next) {
+    const detail = getPath(resp.json, "error_description") ?? getPath(resp.json, "error")
+    throw new Error(
+      `换 token 失败：${typeof detail === "string" ? detail : describeHttpError(resp, "刷新被拒")}`,
+    )
+  }
+  const rotated = getPath(resp.json, "refresh_token")
+  return {
+    accessToken: next,
+    // refresh token 通常会轮换，返回了就换掉，没返回就沿用旧的
+    refreshToken: typeof rotated === "string" && rotated ? rotated : refreshToken,
+  }
 }
 
 /** 导出给 dev/ 的测试用：解析逻辑要能在没有网络的情况下单独验。 */

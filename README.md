@@ -39,7 +39,7 @@
 
 | 服务商 | 拿什么 | 需要填 |
 | --- | --- | --- |
-| Claude 订阅 | 5 小时 / 7 天 / 7 天 Opus 窗口的已用比例 | OAuth access token（`sk-ant-oat...`） |
+| Claude 订阅 | 5 小时 / 7 天 / Sonnet / Opus 窗口的已用比例 | access token + refresh token |
 | OpenRouter | 账户余额，以及这把 key 自己的限额 | API Key |
 | DeepSeek | 余额（CNY / USD 分开列） | API Key |
 | 硅基流动 | 总余额，赠送与充值分开显示 | API Key |
