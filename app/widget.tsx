@@ -1,9 +1,11 @@
 /**
- * 桌面 / 锁屏小组件 —— 终端风（设计方案 B-2「树形连线」）。
+ * 桌面 / 锁屏小组件 —— 终端风。
  *
  * 排版语言来自命令行：一行提示符、等宽对齐的列、`├ └` 画出的从属关系、
- * 方块进度条、底部一行状态。选它是因为 Claude 这类账户有多个额度窗口
- * （5h / 7d / 7d Opus），而终端本来就有表达层级的惯用法。
+ * 方块进度条、底部一行状态。三种尺寸各回答一个问题（见 layout.ts 顶部的表）。
+ *
+ * **这个文件只管把行喂给 `<Text>`。** 哪一行写什么、列宽多少、放几行，全在
+ * layout.ts——它不 import "scripting"，效果图和测试跑的是同一份代码。
  *
  * ## 两条硬约束（都是真机换来的）
  *
@@ -18,10 +20,11 @@
  * 读一次 `Device.colorScheme`，从两套扁平 hex 里选一套（见 theme.ts）。
  * 不用 `{light, dark}` 动态色，也不用语义色——两者在小组件里都没验证过。
  *
- * ## 对齐
+ * ## 为什么用 styledText 而不是几个 Text 拼
  *
- * 等宽排版的命门是列宽。中文账户名是双宽字符，用 `String.length` 补空格会整体
- * 错位，而错位在等宽里特别刺眼。所有补齐都走 `term.ts` 的 `padEnd/padStart`。
+ * 一行里要给「窗口名 / 进度条 / 数值」分别上色。用 HStack 拼多个 `<Text>` 的话，
+ * HStack 会在片段之间加自己的间距，等宽对齐当场就毁了。`styledText` 的分段形式
+ * 把整行当作**一个** Text 渲染，间距完全由字符本身决定。
  */
 import {
   Button,
@@ -32,6 +35,16 @@ import {
   Widget,
 } from "scripting"
 import { RefreshQuotaIntent } from "./app_intents"
+import type { Line as Segs } from "./layout"
+import {
+  FONT,
+  ROWS,
+  footerLine,
+  promptLine,
+  smallModel,
+  tableLines,
+  treeLines,
+} from "./layout"
 import { isStale, refreshAccounts } from "./refresh"
 import {
   applyConfigPatches,
@@ -41,12 +54,10 @@ import {
   saveSnapshot,
   writeWidgetDiag,
 } from "./store"
-import { blockBar, padEnd, padStart } from "./term"
-import type { WidgetPalette } from "./theme"
-import { statusColor, widgetPalette } from "./theme"
-import type { AccountRow, MetricRow } from "./view"
+import { widgetPalette } from "./theme"
+import type { AccountRow } from "./view"
 import { buildRows, enabledRows, sortBySeverity, summarize } from "./view"
-import { fmtClock, fmtReset } from "./util"
+import { fmtReset } from "./util"
 
 const now = Date.now()
 const P = widgetPalette()
@@ -55,100 +66,18 @@ const isAccessory = family.startsWith("accessory")
 const isSmall = family === "systemSmall" || family === "small"
 const isLarge = family === "systemLarge" || family === "large"
 
-/**
- * 每种尺寸的列宽和行数预算。
- *
- * 算法不是拍脑袋：中尺寸宽 364pt，减去左右各 15pt 的内边距还剩 334pt；
- * SF Mono 11pt 的字符步进约 6.6pt，所以一行放得下约 50 列。
- * 行高约 11 × 1.64 ≈ 18pt，中尺寸高 170pt 减上下内边距剩 144pt，约 8 行
- * （1 行提示符 + 6 行内容 + 1 行状态）。大尺寸 382pt 同理约 19 行。
- *
- * 第一版给得太保守（name 10 / win 4 / rows 5），效果图里中尺寸只放得下
- * **一个**账户，中文标签还被截成「5 …」。用实现代码生成效果图才看出来。
- */
-const LAYOUT = isLarge
-  ? { font: 11, name: 13, win: 5, bar: 12, val: 8, rows: 17 }
-  : { font: 11, name: 13, win: 5, bar: 10, val: 8, rows: 6 }
-
-// ---------- 一行由若干带色片段拼成 ----------
-
-interface Seg {
-  t: string
-  c: string
-}
-
-/**
- * 一行等宽文本。
- *
- * 用 `styledText` 的分段形式，而不是把几个 `<Text>` 塞进 HStack——
- * HStack 会在片段之间加自己的间距，等宽对齐当场就毁了。
- */
-function Line({ segs, size }: { segs: Seg[]; size?: number; key?: string }) {
+/** 一行等宽文本，由若干带色片段拼成。 */
+function Line({ segs, size }: { segs: Segs; size?: number; key?: string }) {
   return (
     <Text
       styledText={{
         fontDesign: "monospaced",
-        font: size ?? LAYOUT.font,
+        font: size ?? FONT,
         content: segs.map((s) => ({ content: s.t, foregroundColor: s.c })),
       }}
       lineLimit={1}
     />
   )
-}
-
-function prompt(text: string): Seg[] {
-  return [
-    { t: "$ ", c: P.accent },
-    { t: text, c: P.dim },
-  ]
-}
-
-/** 「├ 5h ███░░░░  58%」这样一行。 */
-function metricSegs(m: MetricRow, last: boolean, indent: boolean): Seg[] {
-  const color = statusColor(P, m.status)
-  return [
-    { t: indent ? (last ? " └ " : " ├ ") : "", c: P.rule },
-    { t: padEnd(m.short, LAYOUT.win), c: P.dim },
-    { t: " ", c: P.dim },
-    { t: blockBar(m.used ?? 0, LAYOUT.bar), c: color },
-    { t: padStart(m.primary, LAYOUT.val + 1), c: P.fg },
-  ]
-}
-
-function accountLines(row: AccountRow, budget: number): Seg[][] {
-  const out: Seg[][] = []
-  if (!row.ok && row.error) {
-    out.push([
-      { t: padEnd(row.account.label, LAYOUT.name + 2), c: P.fg },
-      { t: "failed", c: P.bad },
-    ])
-    return out
-  }
-  const metrics = row.metrics.slice(0, budget)
-  if (metrics.length === 0) {
-    out.push([
-      { t: padEnd(row.account.label, LAYOUT.name + 2), c: P.fg },
-      { t: "no data", c: P.faint },
-    ])
-    return out
-  }
-  // 只有一个指标时不画树线，省一行；多个时账户名单独成行
-  if (metrics.length === 1) {
-    out.push([
-      { t: padEnd(row.account.label, LAYOUT.name), c: P.fg },
-      { t: " ", c: P.fg },
-      ...metricSegs(metrics[0], true, false),
-    ])
-    return out
-  }
-  out.push([
-    { t: padEnd(row.account.label, LAYOUT.name), c: P.fg },
-    { t: `  ${metrics.length} windows`, c: P.faint },
-  ])
-  for (let i = 0; i < metrics.length; i++) {
-    out.push(metricSegs(metrics[i], i === metrics.length - 1, true))
-  }
-  return out
 }
 
 // ---------- 各尺寸 ----------
@@ -162,99 +91,63 @@ interface ViewProps {
 function Empty() {
   return (
     <VStack spacing={4} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-      <Line segs={prompt("ai-quota")} />
+      <Line segs={promptLine(P, "ai-quota")} />
       <Line segs={[{ t: "no accounts configured", c: P.faint }]} />
       <Line segs={[{ t: "open app to add one", c: P.faint }]} />
     </VStack>
   )
 }
 
-/** 小尺寸：只回答「最该操心的那个还剩多少」。 */
-function SmallView({ rows }: ViewProps) {
-  const row = rows[0]
-  if (!row) return <Empty />
-  const m = row.primary
-  const color = m ? statusColor(P, m.status) : P.neutral
-  const failed = !row.ok && !!row.error
+/** 小尺寸：大字是最紧张的窗口，下面列同账户其余窗口。 */
+function SmallView({ rows, updatedAt }: ViewProps) {
+  const model = smallModel(rows, P, now, updatedAt)
+  if (!model) return <Empty />
   return (
     <VStack
-      spacing={3}
+      spacing={2}
       alignment="leading"
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
     >
-      <Line segs={prompt("quota")} />
-      <Spacer />
+      <Line segs={promptLine(P, "quota")} />
       <Text
         styledText={{
           fontDesign: "monospaced",
-          font: 30,
+          font: 28,
           fontWeight: "semibold",
-          content: [{ content: failed ? "fail" : (m?.primary ?? "—"), foregroundColor: color }],
+          content: [{ content: model.hero.text, foregroundColor: model.hero.color }],
         }}
         lineLimit={1}
       />
-      <Line
-        segs={[{ t: `${row.account.label}${m ? " " + m.short : ""}`, c: P.dim }]}
-        size={10}
-      />
-      {m?.used !== undefined ? (
-        <Line segs={[{ t: blockBar(m.used, 10), c: color }]} />
-      ) : null}
+      <Line segs={model.label} size={10} />
+      {model.items.map((segs, i) => (
+        <Line key={String(i)} segs={segs} />
+      ))}
       <Spacer />
-      <Line
-        segs={[
-          {
-            t: m?.metric.resetAt ? fmtReset(m.metric.resetAt, now) : `updated ${fmtClock(now)}`,
-            c: P.faint,
-          },
-        ]}
-        size={10}
-      />
+      <Line segs={model.footer} size={10} />
     </VStack>
   )
 }
 
-/** 中 / 大尺寸：树形清单。 */
+/** 中尺寸是表格（一行一账户），大尺寸是树（一行一窗口）。 */
 function ListView({ rows, totals, updatedAt }: ViewProps) {
   if (rows.length === 0) return <Empty />
-
-  // 按行预算铺，铺不下就停——不做省略号，终端输出本来就是截断的
-  const lines: Seg[][] = []
-  let shown = 0
-  for (const row of rows) {
-    const budget = Math.max(0, LAYOUT.rows - lines.length - 1)
-    if (budget <= 0) break
-    const block = accountLines(row, isLarge ? 4 : 2)
-    if (lines.length + block.length > LAYOUT.rows) break
-    lines.push(...block)
-    shown++
-  }
-
-  const alarming = totals.bad + totals.failed
+  const { lines, shown } = isLarge
+    ? treeLines(rows, P, ROWS.large)
+    : tableLines(rows, P, ROWS.medium)
   return (
     <VStack
       spacing={1}
       alignment="leading"
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
     >
-      <Line segs={prompt(isLarge ? "ai-quota --tree" : "ai-quota")} />
+      <Line segs={promptLine(P, isLarge ? "ai-quota --tree" : "ai-quota")} />
       {lines.map((segs, i) => (
         <Line key={String(i)} segs={segs} />
       ))}
       <Spacer />
       <HStack spacing={0}>
         <Line
-          segs={[
-            { t: `${shown}/${rows.length} accounts`, c: P.faint },
-            { t: "  ", c: P.faint },
-            ...(alarming > 0
-              ? ([
-                  { t: String(alarming), c: P.bad },
-                  { t: " alert  ", c: P.faint },
-                ] as Seg[])
-              : []),
-            { t: fmtClock(updatedAt || now), c: P.faint },
-          ]}
+          segs={footerLine(P, shown, rows.length, totals.bad + totals.failed, updatedAt || now)}
           size={10}
         />
         <Spacer />
@@ -274,7 +167,7 @@ function AccessoryView({ rows }: ViewProps) {
       </VStack>
     )
   }
-  const m = row.primary
+  const m = row.worst
   return (
     <VStack spacing={1} alignment="leading">
       <Text font="caption2" widgetAccentable lineLimit={1}>
@@ -314,7 +207,7 @@ function Failed({ message }: { message: string }) {
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
       backgroundColor={P.bg}
     >
-      <Line segs={prompt("ai-quota")} />
+      <Line segs={promptLine(P, "ai-quota")} />
       <Text
         styledText={{
           fontDesign: "monospaced",

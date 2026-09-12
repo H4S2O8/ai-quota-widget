@@ -66,10 +66,14 @@ export function padEnd(text: string, columns: number): string {
   return clipped + " ".repeat(Math.max(0, columns - displayWidth(clipped)))
 }
 
-/** 右对齐补到指定列宽（数值列用这个）。 */
+/**
+ * 右对齐补到指定列宽（数值列用这个）。
+ *
+ * **不截断。** 数值宁可挤出一列，也不能变成「¥12.…」——截掉的是最要紧的那几位。
+ * 列宽预算在 layout.ts 里留了余量吸收这一列。
+ */
 export function padStart(text: string, columns: number): string {
-  const clipped = clip(text, columns)
-  return " ".repeat(Math.max(0, columns - displayWidth(clipped))) + clipped
+  return " ".repeat(Math.max(0, columns - displayWidth(text))) + text
 }
 
 /**

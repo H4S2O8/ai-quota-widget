@@ -36,6 +36,8 @@ const C = await build("p_commandcode.ts")
 const X = await build("p_codex.ts")
 const TM = await build("term.ts")
 const V = await build("view.ts")
+const LY = await build("layout.ts")
+const TH = await build("theme.ts")
 const R = await build("refresh.ts")
 
 let failures = 0
@@ -332,6 +334,8 @@ eq("超长要截断并留省略号", TM.padEnd("openrouter", 9), "openrout…")
 eq("截断后仍是目标宽度", TM.displayWidth(TM.padEnd("openrouter", 9)), 9)
 eq("中文截断也对齐", TM.displayWidth(TM.padEnd("硅基流动服务", 8)), 8)
 eq("右对齐", TM.padStart("58%", 6), "   58%")
+// 数值列不截断：截掉的是最要紧的那几位
+eq("右对齐超宽不截", TM.padStart("¥12.50", 5), "¥12.50")
 eq("方块条 0%", TM.blockBar(0, 8), "░░░░░░░░")
 eq("方块条 100%", TM.blockBar(1, 8), "████████")
 eq("方块条 50%", TM.blockBar(0.5, 8), "████░░░░")
@@ -416,6 +420,81 @@ eq("汇总 failed", totals.failed, 1)
 check("失败的行仍带着上次的数值", rows.find((r) => r.account.id === "c").primary.metric.value === 50)
 check("行里直接带渲染好的文本", typeof rows[0].primary.primary === "string" && rows[0].primary.primary.length > 0)
 eq("两个界面拿到的是同一份文本", rows[0].primary.primary, U.fmtMetricValue(rows[0].primary.metric, "remaining"))
+
+console.log("\n== 小组件排版（layout.ts） ==")
+// 一个多窗口账户，最紧张的窗口不在第一位——第一版小尺寸就是栽在这里
+const t1 = 1_700_000_000_000
+const win = (id, label, used, resetAt) => ({ id, label, kind: "percent", value: used, resetAt })
+const wideConfig = {
+  version: 1,
+  settings: { refreshMinutes: 15, displayMode: "remaining" },
+  accounts: [
+    { id: "cl", providerId: "anthropic", label: "Claude 订阅", enabled: true, config: {} },
+    { id: "ds", providerId: "deepseek", label: "DeepSeek", enabled: true, config: {} },
+    { id: "or", providerId: "openrouter", label: "OpenRouter", enabled: true, config: {} },
+    { id: "cc", providerId: "commandcode", label: "Command Code", enabled: true, config: {} },
+  ],
+}
+const wideSnapshot = {
+  updatedAt: t1,
+  states: {
+    cl: { ok: true, fetchedAt: t1, result: { metrics: [
+      win("5h", "5 小时", 42, t1 + 7200e3),
+      win("7d", "7 天", 77, t1 + 76 * 3600e3),
+      win("sonnet", "7 天 Sonnet", 30),
+      win("opus", "7 天 Opus", 91, t1 + 76 * 3600e3),
+      win("apps", "7 天 · 第三方应用", 12),
+    ] } },
+    ds: { ok: true, fetchedAt: t1, result: { metrics: [{ id: "bal", label: "余额", kind: "amount", value: 12.5, unit: "¥", max: 50 }] } },
+    or: { ok: false, fetchedAt: t1, error: "401 Unauthorized: key revoked by owner" },
+    cc: { ok: true, fetchedAt: t1, result: { metrics: [] } },
+  },
+}
+const wide = V.sortBySeverity(V.enabledRows(V.buildRows(wideConfig, wideSnapshot, t1)))
+const claude = wide.find((r) => r.account.id === "cl")
+eq("worst 是最紧张的窗口，不是第一个", claude.worst.short, "opus")
+eq("primary 仍是 provider 的第一个", claude.primary.short, "5h")
+eq("汇总按 worst 计：Opus 红了账户就算 bad", V.summarize(V.buildRows(wideConfig, wideSnapshot, t1)).bad, 1)
+
+const P = TH.W_DARK
+const txt = (line) => line.map((s) => s.t).join("")
+const widthsOk = (lines, cols) => lines.every((l) => LY.lineWidth(l) <= cols)
+
+// 小尺寸：失败的账户排最前，大字是 fail；其后才是 Claude
+const sm = LY.smallModel(wide, P, t1, t1)
+eq("小尺寸：失败账户排第一，大字写 fail", sm.hero.text, "fail")
+check("小尺寸每行不超 20 列", widthsOk([sm.label, ...sm.items, sm.footer], LY.COLS.small),
+  [sm.label, ...sm.items, sm.footer].map(txt).join(" | "))
+eq("小尺寸补位行数不超预算", sm.items.length, LY.ROWS.small)
+// 把失败的拿掉，看 Claude 当第一时的行为
+const smClaude = LY.smallModel(wide.filter((r) => r.account.id !== "or"), P, t1, t1)
+eq("小尺寸大字是最紧张的窗口", smClaude.hero.text, "9%")
+eq("小尺寸标签写的是那个窗口", txt(smClaude.label), "Claude 订阅 · opus")
+check("小尺寸其余行不含大字那个窗口", smClaude.items.every((l) => !txt(l).startsWith("opus")))
+eq("小尺寸脚注是重置倒计时", txt(smClaude.footer), "reset 3d4h")
+
+// 中尺寸：表格，5 个窗口要换行续接，一个都不能丢
+const tb = LY.tableLines(wide, P, LY.ROWS.medium)
+check("中尺寸每行不超 48 列", widthsOk(tb.lines, LY.COLS.medium), tb.lines.map(txt).join(" | "))
+eq("中尺寸 4 个账户全显示", tb.shown, 4)
+const claudeLines = tb.lines.filter((l) => txt(l).includes("opus") || txt(l).includes("apps") || txt(l).startsWith("Claude"))
+eq("Claude 的 5 个窗口占两行", claudeLines.length, 2)
+check("续行以 └ 开头", txt(claudeLines[1]).trim().startsWith("└"))
+check("中尺寸 5 个窗口一个不少", ["5h", "7d", "sonn", "opus", "apps"].every((w) => claudeLines.some((l) => txt(l).includes(w))))
+check("失败的账户写 failed 并带错误", tb.lines.some((l) => txt(l).includes("failed 401")))
+check("没数据的账户写 no data", tb.lines.some((l) => txt(l).startsWith("Command Code no data")))
+// 预算只够 1 行时，Claude 那两行铺不下就停
+eq("行预算不够就少显示账户而不是截窗口", LY.tableLines([claude], P, 1).shown, 0)
+
+// 大尺寸：树
+const tr = LY.treeLines(wide, P, LY.ROWS.large)
+check("大尺寸每行不超 48 列", widthsOk(tr.lines, LY.COLS.large), tr.lines.map(txt).join(" | "))
+check("大尺寸窗口数写的是实数", tr.lines.some((l) => txt(l).includes("5 windows")))
+check("大尺寸只有一个指标的账户不画树线", tr.lines.some((l) => txt(l).startsWith("DeepSeek") && txt(l).includes("bal")))
+eq("状态行", txt(LY.footerLine(P, 4, 6, 2, t1)), `4/6 accounts  2 alert  ${U.fmtClock(t1)}`)
+eq("紧凑倒计时：天", U.fmtCountdown(76 * 3600e3), "3d4h")
+eq("紧凑倒计时：小时", U.fmtCountdown(2 * 3600e3 + 5 * 60e3), "2h05m")
+eq("紧凑倒计时：到点", U.fmtCountdown(-1), "now")
 
 console.log("\n== 抓取编排（打真实 HTTP） ==")
 const server = createServer((req, res) => {

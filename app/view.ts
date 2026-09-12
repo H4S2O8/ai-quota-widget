@@ -46,8 +46,16 @@ export interface AccountRow {
   ok: boolean
   error?: string
   fetchedAt: number
-  /** 主指标：小尺寸小组件只显示它。没有数据时为 undefined */
+  /** 第一个指标：provider 自己排的头一项。没有数据时为 undefined */
   primary?: MetricRow
+  /**
+   * 最紧张的那个指标。
+   *
+   * 小组件的小尺寸和锁屏只放得下一个数，放的必须是这个——账户按紧张程度排到
+   * 第一位，是因为它的某个窗口快用完了，结果大字却显示另一个窗口的 58%，
+   * 这就是第一版小尺寸「逻辑奇怪」的根源。并列时取靠前的。
+   */
+  worst?: MetricRow
   metrics: MetricRow[]
   plan?: string
   note?: string
@@ -121,6 +129,7 @@ export function buildRows(
       error: state?.error,
       fetchedAt: state?.fetchedAt ?? 0,
       primary: metrics[0],
+      worst: worstOf(metrics),
       metrics,
       plan: state?.result?.plan,
       note: state?.result?.note,
@@ -131,6 +140,28 @@ export function buildRows(
   })
 }
 
+/** 单个指标的紧张分：出错 > 快用完 > 用了一多半 > 其余。 */
+export function metricScore(row: MetricRow): number {
+  const score =
+    row.status === "bad" ? 80 : row.status === "warn" ? 50 : row.status === "good" ? 10 : 5
+  // 同档时，已用更多的更紧张
+  return score + (row.used !== undefined ? row.used : 0)
+}
+
+/** 一串指标里最紧张的那个；并列取靠前的。 */
+export function worstOf(metrics: MetricRow[]): MetricRow | undefined {
+  let best: MetricRow | undefined
+  let bestScore = -1
+  for (const row of metrics) {
+    const score = metricScore(row)
+    if (score > bestScore) {
+      best = row
+      bestScore = score
+    }
+  }
+  return best
+}
+
 /**
  * 排序权重。小组件放不下所有账户，得先显示「最该看的」：
  * 出错 > 快用完 > 用了一多半 > 其余。停用的沉底。
@@ -138,15 +169,8 @@ export function buildRows(
 function severityOf(metrics: MetricRow[], failed: boolean, enabled: boolean): number {
   if (!enabled) return -1
   if (failed) return 100
-  let worst = 0
-  for (const row of metrics) {
-    const score =
-      row.status === "bad" ? 80 : row.status === "warn" ? 50 : row.status === "good" ? 10 : 5
-    // 同为 bad 时，已用更多的排前面
-    const tie = row.used !== undefined ? row.used : 0
-    worst = Math.max(worst, score + tie)
-  }
-  return worst
+  const top = worstOf(metrics)
+  return top ? metricScore(top) : 0
 }
 
 /** 小组件按紧张程度排；主 App 保持用户自己的顺序，所以只在小组件里用。 */
@@ -158,7 +182,12 @@ export function enabledRows(rows: AccountRow[]): AccountRow[] {
   return rows.filter((row) => row.account.enabled)
 }
 
-/** 面板顶部那一行汇总：几个正常、几个告警、几个失败。 */
+/**
+ * 面板顶部那一行汇总：几个正常、几个告警、几个失败。
+ *
+ * 按每个账户**最紧张**的指标计，和排序用的是同一个判据。曾经按第一个指标计，
+ * 结果 Claude 的 Opus 窗口红了，汇总还说它 good。
+ */
 export function summarize(rows: AccountRow[]): { good: number; warn: number; bad: number; failed: number } {
   let good = 0
   let warn = 0
@@ -169,7 +198,7 @@ export function summarize(rows: AccountRow[]): { good: number; warn: number; bad
       failed++
       continue
     }
-    const status = row.primary?.status ?? "neutral"
+    const status = row.worst?.status ?? "neutral"
     if (status === "bad") bad++
     else if (status === "warn") warn++
     else good++

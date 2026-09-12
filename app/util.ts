@@ -457,16 +457,27 @@ export function fmtCompact(value: number): string {
   return value.toFixed(1)
 }
 
+/**
+ * 紧凑倒计时："2h15m" / "3d4h" / "12m"；已到点给 "now"。
+ *
+ * 小组件的等宽排版按列数预算，主 App 的「后重置」四个字在那里放不下，
+ * 所以时长本身单独一个函数，两边各自加措辞。
+ */
+export function fmtCountdown(diff: number): string {
+  if (diff <= 0) return "now"
+  const minutes = Math.round(diff / 60000)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h${pad2(minutes % 60)}m`
+  const days = Math.floor(hours / 24)
+  return `${days}d${hours % 24}h`
+}
+
 /** "2h15m 后重置" / "3d 后重置" / "已到重置时间" */
 export function fmtReset(resetAt: number, now: number): string {
   const diff = resetAt - now
   if (diff <= 0) return "已到重置时间"
-  const minutes = Math.round(diff / 60000)
-  if (minutes < 60) return `${minutes}m 后重置`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h${pad2(minutes % 60)}m 后重置`
-  const days = Math.floor(hours / 24)
-  return `${days}d${hours % 24}h 后重置`
+  return `${fmtCountdown(diff)} 后重置`
 }
 
 /** "14:32" */
